@@ -1,34 +1,17 @@
 """Postgres integration — requires DATABASE_URL and USE_IN_MEMORY_STORE=false."""
 
 import asyncio
-import os
 
 import pytest
 
-from core.config import settings
 from core.orchestrator import manual_orchestrator
-from core.persistence import get_pool, reset_in_memory_store
+from core.persistence import get_pool
 from core.runtime_session import SessionLockError
-
-
-@pytest.fixture
-def postgres_settings(monkeypatch):
-    monkeypatch.setattr(settings, "use_in_memory_store", False)
-    monkeypatch.setattr(settings, "database_url", os.environ.get(
-        "DATABASE_URL", "postgresql://ceo:ceo@localhost:5432/ceo_agent"
-    ))
-    reset_in_memory_store()
 
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
-async def test_postgres_founder_request(postgres_settings):
-    import asyncpg
-
-    try:
-        await asyncpg.connect(settings.database_url, timeout=2)
-    except Exception:
-        pytest.skip("Postgres not available")
+async def test_postgres_founder_request(postgres_available):
     result = await manual_orchestrator.run_founder_request(
         "Analyze deployment anomaly",
         session_id="pg-session-1",
@@ -41,13 +24,7 @@ async def test_postgres_founder_request(postgres_settings):
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
-async def test_postgres_same_session_contention(postgres_settings):
-    import asyncpg
-
-    try:
-        await asyncpg.connect(settings.database_url, timeout=2)
-    except Exception:
-        pytest.skip("Postgres not available")
+async def test_postgres_same_session_contention(postgres_available):
     session_id = "pg-contention"
     results = await asyncio.gather(
         manual_orchestrator.run_founder_request(

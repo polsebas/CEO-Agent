@@ -26,6 +26,10 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "rrm15: RRM-1.5 Replay Integrity gate (SPEC-RRM1.5)",
+    "postgres: requires DATABASE_URL and Postgres (skipped locally if unavailable)",
+]
 
 [build-system]
 requires = ["hatchling"]

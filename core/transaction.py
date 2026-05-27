@@ -102,9 +102,9 @@ async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> Persi
     if isinstance(conn, MemoryConnection):
         apply_memory_runtime_persist(payload, event, world_snap)
         if payload.store_replay_baseline and payload.event_type == "session.completed":
-            from core.replay_store import save_baseline_fingerprint_memory
-
+            from core.replay_store import save_baseline_record_memory
             from core.replay_validator import build_canonical_outcome
+            from core.replay_version import ORCHESTRATOR_VERSION
             from schemas.replay import outcome_fingerprint
 
             outcome = await build_canonical_outcome(
@@ -112,10 +112,11 @@ async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> Persi
                 payload.correlation_id,
                 conn=conn,
             )
-            save_baseline_fingerprint_memory(
+            save_baseline_record_memory(
                 payload.session_id,
                 payload.correlation_id,
                 outcome_fingerprint(outcome),
+                ORCHESTRATOR_VERSION,
             )
         return PersistResult(event=event, inserted=True)
 
@@ -217,19 +218,24 @@ async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> Persi
         )
     if payload.store_replay_baseline and payload.event_type == "session.completed":
         from core.replay_validator import build_canonical_outcome
+        from core.replay_version import ORCHESTRATOR_VERSION
         from schemas.replay import outcome_fingerprint
 
         outcome = await build_canonical_outcome(payload.session_id, payload.correlation_id, conn=conn)
         fp = outcome_fingerprint(outcome)
         await conn.execute(
             """
-            INSERT INTO replay_baselines (session_id, correlation_id, outcome_fingerprint, created_at)
-            VALUES ($1,$2,$3,$4)
-            ON CONFLICT (session_id) DO UPDATE SET outcome_fingerprint = EXCLUDED.outcome_fingerprint
+            INSERT INTO replay_baselines
+            (session_id, correlation_id, outcome_fingerprint, orchestrator_version, created_at)
+            VALUES ($1,$2,$3,$4,$5)
+            ON CONFLICT (session_id) DO UPDATE SET
+                outcome_fingerprint = EXCLUDED.outcome_fingerprint,
+                orchestrator_version = EXCLUDED.orchestrator_version
             """,
             payload.session_id,
             payload.correlation_id,
             fp,
+            ORCHESTRATOR_VERSION,
             datetime.now(timezone.utc),
         )
 

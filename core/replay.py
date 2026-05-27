@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from core.live_replay_adapter import live_replay_adapter
 from core.replay_diff import diff_canonical_outcomes
 from core.replay_validator import prompt_hash, reorchestrate_frozen_outcome, validate_frozen_replay
 from core.persistence import get_replay_snapshots
@@ -17,8 +18,6 @@ class ReplayEngine:
         session_id: str,
         correlation_id: str,
         mode: ReplayMode = ReplayMode.FROZEN,
-        *,
-        live_tool_mutator=None,
     ) -> ReplaySession:
         snapshots_raw = await get_replay_snapshots(session_id)
 
@@ -69,12 +68,15 @@ class ReplayEngine:
             return session
 
         baseline_outcome = await reorchestrate_frozen_outcome(session_id, correlation_id)
-        if live_tool_mutator:
-            live_tool_mutator(snapshots_raw)
-        live_outcome = await reorchestrate_frozen_outcome(session_id, correlation_id)
+        live_outcome = await live_replay_adapter.run_live_outcome(
+            session_id, correlation_id
+        )
         drift = diff_canonical_outcomes(baseline_outcome, live_outcome)
-        session.world_state_snapshot["expected_fingerprint"] = outcome_fingerprint(baseline_outcome)
+        session.world_state_snapshot["expected_fingerprint"] = outcome_fingerprint(
+            baseline_outcome
+        )
         session.world_state_snapshot["live_fingerprint"] = outcome_fingerprint(live_outcome)
+        session.world_state_snapshot["replay_source"] = "live_tool_adapter"
         session.outcome_match = len(drift) == 0
         session.world_state_snapshot["drift_fields"] = list(drift.keys())
         return session

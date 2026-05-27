@@ -1,10 +1,16 @@
+import copy
+from unittest.mock import patch
+
 import pytest
 
+from core.live_replay_adapter import LiveToolReplayAdapter, live_replay_adapter
 from core.orchestrator import manual_orchestrator
 from core.persistence import reset_in_memory_store
 from core.replay import replay_engine
 from core.replay_store import get_replay_snapshots_memory
 from schemas.runtime import ReplayMode
+from schemas.tools import ToolResult
+from tools.router import execute_tool
 
 
 @pytest.mark.asyncio
@@ -17,21 +23,26 @@ async def test_live_replay_detects_drift():
         session_id=session_id,
         correlation_id=correlation_id,
     )
+    before = copy.deepcopy(get_replay_snapshots_memory(session_id))
 
-    def mutator(snaps):
-        if snaps:
-            snaps[0].setdefault("tool_results", [])
-            if snaps[0]["tool_results"]:
-                snaps[0]["tool_results"][0]["tool_name"] = "mutated_tool"
+    original_execute = execute_tool
 
-    session = await replay_engine.replay_session(
-        session_id,
-        correlation_id,
-        ReplayMode.LIVE,
-        live_tool_mutator=mutator,
-    )
+    async def drifted_execute(tool_name, agent_id, correlation_id, params=None):
+        result = await original_execute(tool_name, agent_id, correlation_id, params)
+        return result.model_copy(update={"tool_name": "mutated_tool"})
+
+    adapter = LiveToolReplayAdapter(tool_executor=drifted_execute)
+    with patch("core.replay.live_replay_adapter", adapter):
+        session = await replay_engine.replay_session(
+            session_id,
+            correlation_id,
+            ReplayMode.LIVE,
+        )
+
     assert session.outcome_match is False
     assert session.world_state_snapshot.get("drift_fields")
+    assert session.world_state_snapshot.get("replay_source") == "live_tool_adapter"
+    assert get_replay_snapshots_memory(session_id) == before
 
 
 @pytest.mark.asyncio

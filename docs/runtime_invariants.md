@@ -9,6 +9,8 @@ These rules govern all production runtime changes. PRs that violate them are rej
 - **Replay snapshots** are transactionally persisted in the same TX as decision/outbox/world updates.
 - **Postgres** is the only source of truth in production (no dual-write to in-memory lists).
 - **Runtime determinism** is measured through `CanonicalReplayOutcome` fingerprints via `canonical_json` / `stable_hash`.
+- **Frozen replay** re-executes orchestration steps from a versioned `SnapshotBundle` via `FrozenReplayExecutor` (see [RRM1.5.md](./RRM1.5.md)).
+- **Live replay** re-executes tools via `LiveToolReplayAdapter` on a copied bundle — never mutates persisted `replay_snapshots`.
 - **Structured retries** are owned by the runtime (`StructuredRetryTrace`). Agno internal retries must be disabled or bounded.
 - **Tool parameters and bindings** are hashed via `canonical_json` (stable key ordering, volatile fields stripped).
 

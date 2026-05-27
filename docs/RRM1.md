@@ -42,6 +42,14 @@ See [runtime_invariants.md](./runtime_invariants.md).
 | RRM1-R7 | Producción: Postgres SoT; in-memory solo con `use_in_memory_store` |
 | RRM1-R8 | Gate en `tests/gate/`, contención en `tests/integration/` |
 
-## Post-RRM-1 (out of scope)
+## RRM-1.5 — Replay Integrity ✅ CERRADO
+
+Execution replay (frozen + live), baseline versionado, gates Postgres y outbox.
+
+- Spec: [RRM1.5.md](./RRM1.5.md)
+- Gates: `tests/gate/test_rrm15_replay_integrity.py`, `tests/gate/test_outbox_semantics.py`
+- Postgres: `tests/integration/test_postgres_replay.py`, `tests/integration/test_postgres_outbox.py`
+
+## RRM-2 (desbloqueado)
 
 Embeddings sophistication, semantic cache tuning, advanced prompts, multi-agent delegation, timeline UI, OpenTelemetry.

@@ -16,6 +16,7 @@ _in_memory_decisions: list[DecisionRecord] = []
 _in_memory_effects: list[SideEffectRecord] = []
 _in_memory_snapshots: list[WorldStateSnapshot] = []
 _in_memory_agent_health: dict[str, dict] = {}
+_in_memory_runtime_transitions: list[dict] = []
 _processed_idempotency: set[str] = set()
 _world_state: WorldState = default_world_state()
 _pool = None
@@ -140,8 +141,10 @@ async def init_schema(pool) -> None:
                 session_id TEXT PRIMARY KEY,
                 correlation_id TEXT NOT NULL,
                 outcome_fingerprint TEXT NOT NULL,
+                orchestrator_version TEXT,
                 created_at TIMESTAMPTZ NOT NULL
             );
+            ALTER TABLE replay_baselines ADD COLUMN IF NOT EXISTS orchestrator_version TEXT;
 
             CREATE TABLE IF NOT EXISTS processed_idempotency (
                 idempotency_key TEXT PRIMARY KEY,
@@ -480,10 +483,73 @@ def apply_memory_runtime_persist(payload, event: OutboxEvent, world_snap: WorldS
     if world_snap:
         _in_memory_snapshots.append(world_snap)
         _world_state = WorldState.model_validate(world_snap.state)
+    if payload.runtime_transition:
+        rt = payload.runtime_transition
+        _in_memory_runtime_transitions.append(
+            {
+                "correlation_id": rt.correlation_id,
+                "session_id": rt.session_id,
+                "from_state": rt.from_state,
+                "to_state": rt.to_state,
+            }
+        )
     if payload.replay_snapshot is not None and payload.replay_step is not None:
         from core.replay_store import save_replay_snapshot_memory
 
         save_replay_snapshot_memory(payload.session_id, payload.replay_step, payload.replay_snapshot)
+
+
+async def get_runtime_transitions(session_id: str, *, conn=None) -> list:
+    from core.config import settings
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return [t for t in _in_memory_runtime_transitions if t["session_id"] == session_id]
+    if conn is not None:
+        rows = await conn.fetch(
+            """
+            SELECT correlation_id, session_id, from_state, to_state
+            FROM runtime_transitions
+            WHERE session_id = $1
+            ORDER BY created_at ASC
+            """,
+            session_id,
+        )
+        return [dict(r) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await get_runtime_transitions(session_id, conn=c)
+    return []
+
+
+async def get_replay_baseline_meta(session_id: str, *, conn=None) -> dict | None:
+    from core.config import settings
+    from core.replay_store import get_baseline_record_memory
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_baseline_record_memory(session_id)
+    if conn is not None:
+        row = await conn.fetchrow(
+            """
+            SELECT correlation_id, outcome_fingerprint, orchestrator_version
+            FROM replay_baselines WHERE session_id = $1
+            """,
+            session_id,
+        )
+        if not row:
+            return None
+        return {
+            "correlation_id": row["correlation_id"],
+            "outcome_fingerprint": row["outcome_fingerprint"],
+            "orchestrator_version": row["orchestrator_version"] or "rrm15-legacy",
+        }
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await get_replay_baseline_meta(session_id, conn=c)
+    return None
 
 
 async def get_replay_baseline(session_id: str, *, conn=None) -> str | None:
@@ -514,8 +580,12 @@ def reset_in_memory_store() -> None:
     _in_memory_decisions.clear()
     _in_memory_effects.clear()
     _in_memory_snapshots.clear()
+    _in_memory_runtime_transitions.clear()
     _in_memory_agent_health.clear()
     _processed_idempotency.clear()
+    from core.replay_store import reset_replay_store
+
+    reset_replay_store()
     _world_state = default_world_state()
     _pool = None
     reset_governance_memory()
