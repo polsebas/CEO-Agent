@@ -73,6 +73,8 @@ class CognitiveBudget(BaseModel):
     debate_budget: int = 0
     max_cost_usd: float = 1.0
     fallback_model: str = "gpt-4o-mini"
+    max_retries: int = 3
+    force_deterministic: bool = False
 
 
 class OutboxEvent(BaseModel):

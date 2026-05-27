@@ -54,10 +54,20 @@ async def execute_tool(
     agent_id: str,
     correlation_id: str,
     params: dict | None = None,
+    *,
+    session_id: str | None = None,
 ) -> ToolResult:
+    from core.spans import span_manager
+    from schemas.spans import SpanStatus, SpanType
+
+    tspan = span_manager.start(
+        SpanType.TOOL_EXECUTION,
+        metadata={"tool_name": tool_name, "agent_id": agent_id},
+    )
     params = _canonical_params(params)
     cap = tool_registry.get(tool_name)
     if not cap:
+        span_manager.end(tspan, status=SpanStatus.ERROR)
         return ToolResult(
             success=False,
             errors=[f"Unknown tool: {tool_name}"],
@@ -67,6 +77,7 @@ async def execute_tool(
             correlation_id=correlation_id,
         )
     if not tool_registry.is_allowed(tool_name, agent_id) and agent_id != "system":
+        span_manager.end(tspan, status=SpanStatus.ERROR)
         return ToolResult(
             success=False,
             errors=[f"Agent {agent_id} not allowed to use {tool_name}"],
@@ -86,6 +97,7 @@ async def execute_tool(
         )
         decision = policy_engine.evaluate(proposal)
         if decision == PolicyDecision.ESCALATE:
+            span_manager.end(tspan, status=SpanStatus.OK)
             return ToolResult(
                 success=False,
                 errors=["WAITING_APPROVAL"],
@@ -99,6 +111,7 @@ async def execute_tool(
     if tool_name in CACHEABLE:
         cached = await cache_get(tool_name, params)
         if cached:
+            span_manager.end(tspan, status=SpanStatus.OK)
             return ToolResult(
                 success=True,
                 data=cached,
@@ -111,6 +124,7 @@ async def execute_tool(
 
     handler = TOOL_HANDLERS.get(tool_name)
     if not handler:
+        span_manager.end(tspan, status=SpanStatus.ERROR)
         return ToolResult(
             success=False,
             errors=[f"No handler for {tool_name}"],
@@ -126,4 +140,9 @@ async def execute_tool(
     if result.success and tool_name in CACHEABLE and result.data:
         await cache_set(tool_name, params, result.data)
 
+    span_manager.end(
+        tspan,
+        status=SpanStatus.OK if result.success else SpanStatus.ERROR,
+        metadata={"latency_ms": result.latency_ms, "session_id": session_id or ""},
+    )
     return result

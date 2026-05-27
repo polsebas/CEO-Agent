@@ -8,9 +8,13 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from schemas.cognition import StructuredRetryTrace
+from core.cognition_metrics import TimedReasoning, cognition_engine, estimate_tokens
+from core.config import settings
+from core.spans import span_manager
+from schemas.cognition import CognitiveTelemetry, StructuredRetryTrace
 from schemas.responses.base import parse_structured_response, reset_retry_counter
 from schemas.runtime import CognitiveBudget
+from schemas.spans import SpanStatus, SpanType
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -27,9 +31,17 @@ class StructuredAgentRunner:
         agent_id: str = "ceo",
         step_id: int = 0,
         budget: CognitiveBudget | None = None,
-    ) -> tuple[T, StructuredRetryTrace]:
+    ) -> tuple[T, StructuredRetryTrace, CognitiveTelemetry]:
         budget = budget or CognitiveBudget()
+        if settings.runtime_health_enforcement and getattr(budget, "force_deterministic", False):
+            budget = CognitiveBudget(max_retries=0, reasoning_budget=budget.reasoning_budget)
+
         reset_retry_counter(correlation_id)
+        span = span_manager.start(
+            SpanType.AGENT_REASONING,
+            runtime_state="reasoning",
+            metadata={"agent_id": agent_id, "step_id": step_id},
+        )
         trace = StructuredRetryTrace(
             correlation_id=correlation_id,
             session_id=session_id or correlation_id,
@@ -40,39 +52,76 @@ class StructuredAgentRunner:
         model = getattr(agent, "model", None)
         llm_attempts = 0
 
-        if model is not None:
-            try:
-                run_response = await agent.arun(prompt, output_schema=response_model)
-                llm_attempts = 1
-                content = getattr(run_response, "content", None)
-                if isinstance(content, response_model):
-                    trace.llm_retry_triggered = llm_attempts > 1
-                    return content, trace
-                if content is not None:
-                    raw = content if isinstance(content, str) else json.dumps(content)
-                    try:
-                        parsed = parse_structured_response(raw, response_model, correlation_id)
+        with TimedReasoning() as timer:
+            if model is not None and not budget.force_deterministic:
+                try:
+                    run_response = await agent.arun(prompt, output_schema=response_model)
+                    llm_attempts = 1
+                    content = getattr(run_response, "content", None)
+                    if isinstance(content, response_model):
                         trace.llm_retry_triggered = llm_attempts > 1
-                        return parsed, trace
-                    except (ValidationError, ValueError) as exc:
-                        trace.validation_error = str(exc)
-                        trace.repair_attempts += 1
-                        trace.llm_retry_triggered = True
-            except Exception as exc:
-                trace.validation_error = str(exc)
-                trace.final_failure_reason = str(exc)
-                trace.llm_retry_triggered = llm_attempts > 1
+                        tel = self._telemetry(
+                            correlation_id, session_id, agent_id, trace, timer.elapsed_ms, prompt
+                        )
+                        span_manager.end(span, status=SpanStatus.OK)
+                        return content, trace, tel
+                    if content is not None:
+                        raw = content if isinstance(content, str) else json.dumps(content)
+                        try:
+                            parsed = parse_structured_response(raw, response_model, correlation_id)
+                            trace.llm_retry_triggered = llm_attempts > 1
+                            tel = self._telemetry(
+                                correlation_id, session_id, agent_id, trace, timer.elapsed_ms, prompt
+                            )
+                            span_manager.end(span, status=SpanStatus.OK)
+                            return parsed, trace, tel
+                        except (ValidationError, ValueError) as exc:
+                            trace.validation_error = str(exc)
+                            trace.repair_attempts += 1
+                            trace.llm_retry_triggered = True
+                except Exception as exc:
+                    trace.validation_error = str(exc)
+                    trace.final_failure_reason = str(exc)
+                    trace.llm_retry_triggered = llm_attempts > 1
 
-        fallback = self._deterministic_fallback(prompt, response_model, budget)
-        try:
-            parsed = parse_structured_response(fallback, response_model, correlation_id)
-            return parsed, trace
-        except (ValidationError, ValueError) as exc:
-            trace.validation_error = str(exc)
-            trace.repair_attempts += 1
-            trace.final_failure_reason = str(exc)
-            trace.llm_retry_triggered = llm_attempts > 0
-            return response_model.model_validate(json.loads(fallback)), trace
+            fallback = self._deterministic_fallback(prompt, response_model, budget)
+            try:
+                parsed = parse_structured_response(fallback, response_model, correlation_id)
+                tel = self._telemetry(
+                    correlation_id, session_id, agent_id, trace, timer.elapsed_ms, prompt
+                )
+                span_manager.end(span, status=SpanStatus.OK)
+                return parsed, trace, tel
+            except (ValidationError, ValueError) as exc:
+                trace.validation_error = str(exc)
+                trace.repair_attempts += 1
+                trace.final_failure_reason = str(exc)
+                trace.llm_retry_triggered = llm_attempts > 0
+                tel = self._telemetry(
+                    correlation_id, session_id, agent_id, trace, timer.elapsed_ms, prompt
+                )
+                span_manager.end(span, status=SpanStatus.ERROR)
+                return response_model.model_validate(json.loads(fallback)), trace, tel
+
+    def _telemetry(
+        self,
+        correlation_id: str,
+        session_id: str,
+        agent_id: str,
+        trace: StructuredRetryTrace,
+        latency_ms: int,
+        prompt: str,
+    ) -> CognitiveTelemetry:
+        tel = cognition_engine.build(
+            correlation_id=correlation_id,
+            session_id=session_id or correlation_id,
+            agent_id=agent_id,
+            trace=trace,
+            token_estimate=estimate_tokens(prompt),
+            reasoning_latency_ms=latency_ms,
+        )
+        cognition_engine.record_otel(tel)
+        return tel
 
     def _deterministic_fallback(
         self,

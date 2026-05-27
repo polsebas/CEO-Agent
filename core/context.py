@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from core.canonical import stable_hash
+from core.context_lifecycle import context_lifecycle
 from schemas.context import ContextFingerprint
 from schemas.decisions import DecisionRecord
 from schemas.runtime import ContextLayer
@@ -50,6 +51,7 @@ class ContextWindowManager(BaseModel):
         archived: str | None = None,
         extra_layers: list[ContextLayer] | None = None,
     ) -> ContextBundle:
+        context_lifecycle.register_session(session_id)
         bundle = ContextBundle(session_id=session_id, task_id=task_id)
         budget = self.max_tokens
 
@@ -80,13 +82,31 @@ class ContextWindowManager(BaseModel):
         used = self.max_tokens - max(0, budget)
         bundle.estimated_tokens = used
         sources = [layer.value for layer in bundle.layers]
-        bundle.fingerprint = ContextFingerprint(
+        fp = ContextFingerprint(
             context_hash=stable_hash({k.value: v for k, v in bundle.layers.items()}),
             retrieval_sources=sources,
             retrieval_scores={s: float(self.memory_priority_rules.get(s, 50)) for s in sources},
             token_utilization=used / self.max_tokens if self.max_tokens else 0.0,
             compression_ratio=used / max(_estimate_tokens(active_task + l2), 1),
+            compression_strategy=self.compression_strategy,
         )
+        if context_lifecycle.should_summarize(fp):
+            layers_str = {k.value: v for k, v in bundle.layers.items()}
+            new_layers, entry = context_lifecycle.summarize_old_context(layers_str)
+            bundle.layers = {ContextLayer(k): v for k, v in new_layers.items()}
+            fp = context_lifecycle.enrich_fingerprint(
+                fp,
+                session_id=session_id,
+                compression_strategy="deterministic_summarize",
+                provenance_entry=entry,
+            )
+        else:
+            fp = context_lifecycle.enrich_fingerprint(
+                fp,
+                session_id=session_id,
+                compression_strategy=self.compression_strategy,
+            )
+        bundle.fingerprint = fp
         return bundle
 
     def within_budget(self, bundle: ContextBundle, memory_budget: int) -> bool:

@@ -15,6 +15,11 @@ dependencies = [
     "redis>=5.2.0",
     "python-dotenv>=1.0.0",
     "python-jose[cryptography]>=3.3.0",
+    "opentelemetry-api>=1.28.0",
+    "opentelemetry-sdk>=1.28.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.28.0",
+    "opentelemetry-exporter-prometheus>=0.52b0",
+    "prometheus-client>=0.21.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +33,8 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "rrm15: RRM-1.5 Replay Integrity gate (SPEC-RRM1.5)",
+    "rrm2: RRM-2 Runtime Intelligence gate (SPEC-RRM2)",
+    "rrm21: RRM-2.1 Intelligence Reliability Hardening gate",
     "postgres: requires DATABASE_URL and Postgres (skipped locally if unavailable)",
 ]
 
@@ -36,4 +43,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["agents", "api", "core", "schemas", "tools", "workers", "experimental"]
+packages = ["agents", "api", "core", "core.telemetry", "schemas", "tools", "workers", "experimental"]

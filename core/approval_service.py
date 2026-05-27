@@ -11,8 +11,10 @@ from core.governance_store import append_audit_event, load_approval, save_approv
 from core.persistence import get_world_state
 from core.policy import PolicyDecision, policy_engine
 from core.runtime_session import run_mutative_session
+from core.spans import span_manager
 from core.transaction import PersistRuntimePayload, persist_runtime_tx
 from schemas.approvals import ActionProposal, Approval, ApprovalBinding, ApprovalStatus, ImmutableActionProposal
+from schemas.spans import SpanStatus, SpanType
 from schemas.effects import SideEffectRecord
 from tools.router import execute_tool
 
@@ -66,6 +68,11 @@ def create_immutable_proposal(
 
 
 async def prepare_approval(conn: Any, proposal: ImmutableActionProposal, requester_agent: str) -> Approval:
+    span_manager.begin_session(
+        session_id=proposal.correlation_id,
+        correlation_id=proposal.correlation_id,
+    )
+    asp = span_manager.start(SpanType.APPROVAL, metadata={"phase": "prepare", "action": proposal.action})
     if proposal.checksum != proposal_checksum(proposal):
         raise ValueError("Proposal checksum invalid")
     action_proposal = ActionProposal(
@@ -98,6 +105,17 @@ async def prepare_approval(conn: Any, proposal: ImmutableActionProposal, request
         correlation_id=proposal.correlation_id,
         payload={"approval_id": approval_id, "action": proposal.action},
     )
+    await persist_runtime_tx(
+        conn,
+        PersistRuntimePayload(
+            correlation_id=proposal.correlation_id,
+            session_id=proposal.correlation_id,
+            event_type="approval.prepared",
+            event_payload={"approval_id": approval_id, "action": proposal.action},
+            business_key=f"approval:prepare:{approval_id}",
+        ),
+    )
+    span_manager.end(asp, status=SpanStatus.OK)
     return approval
 
 
@@ -114,6 +132,14 @@ def _validate_binding(frozen: ImmutableActionProposal, approval: Approval) -> No
 
 
 async def execute_approved_action(conn: Any, approval: Approval, approved_by: str) -> dict:
+    span_manager.begin_session(
+        session_id=approval.correlation_id,
+        correlation_id=approval.correlation_id,
+    )
+    asp = span_manager.start(
+        SpanType.APPROVAL,
+        metadata={"phase": "execute", "approval_id": approval.id},
+    )
     frozen = approval.immutable_proposal
     if frozen is None:
         raise ValueError("Missing immutable proposal")
@@ -145,6 +171,7 @@ async def execute_approved_action(conn: Any, approval: Approval, approved_by: st
         frozen.agent,
         frozen.correlation_id,
         frozen.parameters,
+        session_id=approval.correlation_id,
     )
 
     effect = SideEffectRecord(
@@ -181,6 +208,7 @@ async def execute_approved_action(conn: Any, approval: Approval, approved_by: st
         correlation_id=frozen.correlation_id,
         payload={"approval_id": approval.id, "success": result.success},
     )
+    span_manager.end(asp, status=SpanStatus.OK if result.success else SpanStatus.ERROR)
     return {"approval_id": approval.id, "execution": result.model_dump(), "side_effect": effect.model_dump()}
 
 

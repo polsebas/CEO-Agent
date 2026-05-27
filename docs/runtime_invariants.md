@@ -11,6 +11,7 @@ These rules govern all production runtime changes. PRs that violate them are rej
 - **Runtime determinism** is measured through `CanonicalReplayOutcome` fingerprints via `canonical_json` / `stable_hash`.
 - **Frozen replay** re-executes orchestration steps from a versioned `SnapshotBundle` via `FrozenReplayExecutor` (see [RRM1.5.md](./RRM1.5.md)).
 - **Live replay** re-executes tools via `LiveToolReplayAdapter` on a copied bundle — never mutates persisted `replay_snapshots`.
+- **Runtime intelligence** (RRM-2) persists spans/telemetry/health via the same `persist_runtime_tx` boundary — observational only; see [RRM2.md](./RRM2.md).
 - **Structured retries** are owned by the runtime (`StructuredRetryTrace`). Agno internal retries must be disabled or bounded.
 - **Tool parameters and bindings** are hashed via `canonical_json` (stable key ordering, volatile fields stripped).
 

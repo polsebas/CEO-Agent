@@ -150,6 +150,69 @@ async def init_schema(pool) -> None:
                 idempotency_key TEXT PRIMARY KEY,
                 processed_at TIMESTAMPTZ NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS execution_spans (
+                span_id TEXT PRIMARY KEY,
+                trace_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                parent_span_id TEXT,
+                span_type TEXT NOT NULL,
+                runtime_state TEXT,
+                started_at TIMESTAMPTZ NOT NULL,
+                completed_at TIMESTAMPTZ,
+                status TEXT NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_spans_session_corr ON execution_spans(session_id, correlation_id);
+            CREATE INDEX IF NOT EXISTS idx_spans_parent ON execution_spans(parent_span_id);
+            CREATE INDEX IF NOT EXISTS idx_spans_trace ON execution_spans(trace_id);
+
+            CREATE TABLE IF NOT EXISTS cognitive_telemetry (
+                id SERIAL PRIMARY KEY,
+                correlation_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_cog_session ON cognitive_telemetry(session_id, correlation_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS runtime_health_snapshots (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                generated_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_health_session ON runtime_health_snapshots(session_id, generated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS prompt_lineage (
+                prompt_hash TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (prompt_hash, session_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_lineage_session ON prompt_lineage(session_id);
+
+            CREATE TABLE IF NOT EXISTS runtime_anomalies (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                severity TEXT NOT NULL,
+                detected_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_anom_session ON runtime_anomalies(session_id, severity, detected_at);
+
+            CREATE TABLE IF NOT EXISTS session_diagnostics (
+                session_id TEXT PRIMARY KEY,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
             """
         )
 
@@ -475,6 +538,8 @@ def _row_to_outbox(row) -> OutboxEvent:
 def apply_memory_runtime_persist(payload, event: OutboxEvent, world_snap: WorldStateSnapshot | None) -> None:
     """In-memory path for tests and use_in_memory_store mode."""
     global _world_state
+    from core.intelligence_persist import apply_intelligence_memory
+
     if payload.decision:
         _in_memory_decisions.append(payload.decision)
     if payload.side_effect:
@@ -497,6 +562,11 @@ def apply_memory_runtime_persist(payload, event: OutboxEvent, world_snap: WorldS
         from core.replay_store import save_replay_snapshot_memory
 
         save_replay_snapshot_memory(payload.session_id, payload.replay_step, payload.replay_snapshot)
+    if payload.retry_trace:
+        from core.intelligence_store import append_retry_trace
+
+        append_retry_trace(payload.retry_trace.model_dump(mode="json"))
+    apply_intelligence_memory(payload)
 
 
 async def get_runtime_transitions(session_id: str, *, conn=None) -> list:
@@ -572,10 +642,145 @@ async def get_replay_baseline(session_id: str, *, conn=None) -> str | None:
     return None
 
 
+async def query_execution_spans(
+    session_id: str,
+    *,
+    correlation_id: str | None = None,
+    conn=None,
+) -> list:
+    from core.config import settings
+    from core.intelligence_store import get_spans
+    from core.runtime_session import MemoryConnection
+    from schemas.spans import ExecutionSpan
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_spans(session_id, correlation_id=correlation_id)
+    if conn is not None:
+        q = "SELECT * FROM execution_spans WHERE session_id = $1"
+        args: list = [session_id]
+        if correlation_id:
+            q += " AND correlation_id = $2"
+            args.append(correlation_id)
+        q += " ORDER BY started_at ASC"
+        rows = await conn.fetch(q, *args)
+        return [_row_to_span(r) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_execution_spans(session_id, correlation_id=correlation_id, conn=c)
+    return []
+
+
+async def query_cognitive_telemetry(session_id: str, *, correlation_id: str | None = None, conn=None) -> list:
+    from core.config import settings
+    from core.intelligence_store import get_telemetry
+    from core.runtime_session import MemoryConnection
+    from schemas.cognition import CognitiveTelemetry
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_telemetry(session_id, correlation_id=correlation_id)
+    if conn is not None:
+        q = "SELECT data FROM cognitive_telemetry WHERE session_id = $1"
+        args: list = [session_id]
+        if correlation_id:
+            q += " AND correlation_id = $2"
+            args.append(correlation_id)
+        q += " ORDER BY created_at ASC"
+        rows = await conn.fetch(q, *args)
+        return [CognitiveTelemetry.model_validate(_json_data(r["data"])) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_cognitive_telemetry(session_id, correlation_id=correlation_id, conn=c)
+    return []
+
+
+async def query_runtime_health(session_id: str, *, conn=None) -> list:
+    from core.config import settings
+    from core.intelligence_store import get_health_snapshots
+    from core.runtime_session import MemoryConnection
+    from schemas.runtime_health import RuntimeHealth
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_health_snapshots(session_id)
+    if conn is not None:
+        rows = await conn.fetch(
+            "SELECT data FROM runtime_health_snapshots WHERE session_id = $1 ORDER BY generated_at DESC",
+            session_id,
+        )
+        return [RuntimeHealth.model_validate(_json_data(r["data"])) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_runtime_health(session_id, conn=c)
+    return []
+
+
+async def query_session_diagnostics_row(session_id: str, *, conn=None):
+    from core.config import settings
+    from core.intelligence_store import get_session_diagnostics
+    from core.runtime_session import MemoryConnection
+    from schemas.diagnostics import SessionDiagnostics
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_session_diagnostics(session_id)
+    if conn is not None:
+        row = await conn.fetchrow(
+            "SELECT data FROM session_diagnostics WHERE session_id = $1",
+            session_id,
+        )
+        if not row:
+            return None
+        return SessionDiagnostics.model_validate(_json_data(row["data"]))
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_session_diagnostics_row(session_id, conn=c)
+    return None
+
+
+def _json_data(val):
+    if isinstance(val, str):
+        return json.loads(val)
+    return val
+
+
+def _row_to_span(row) -> "ExecutionSpan":
+    from schemas.spans import ExecutionSpan, SpanStatus, SpanType
+
+    meta = row["metadata"]
+    if isinstance(meta, str):
+        meta = json.loads(meta)
+    return ExecutionSpan(
+        span_id=row["span_id"],
+        trace_id=row["trace_id"],
+        correlation_id=row["correlation_id"],
+        session_id=row["session_id"],
+        parent_span_id=row["parent_span_id"],
+        span_type=SpanType(row["span_type"]),
+        runtime_state=row["runtime_state"] or "",
+        started_at=row["started_at"],
+        completed_at=row["completed_at"],
+        status=SpanStatus(row["status"]),
+        metadata=meta or {},
+    )
+
+
+def get_memory_outbox_by_idempotency(idempotency_key: str) -> OutboxEvent | None:
+    for event in reversed(_in_memory_outbox):
+        if event.idempotency_key == idempotency_key:
+            return event
+    return None
+
+
 def reset_in_memory_store() -> None:
     global _world_state, _pool
     from core.governance_store import reset_governance_memory
+    from core.intelligence_store import reset_intelligence_store
+    from core.prompt_lineage import prompt_lineage_tracker
 
+    reset_intelligence_store()
+    prompt_lineage_tracker._last_hash.clear()
     _in_memory_outbox.clear()
     _in_memory_decisions.clear()
     _in_memory_effects.clear()

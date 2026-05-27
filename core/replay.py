@@ -19,9 +19,15 @@ class ReplayEngine:
         correlation_id: str,
         mode: ReplayMode = ReplayMode.FROZEN,
     ) -> ReplaySession:
+        from core.spans import span_manager
+        from schemas.spans import SpanStatus, SpanType
+
+        span_manager.begin_session(session_id=session_id, correlation_id=correlation_id)
+        rspan = span_manager.start(SpanType.REPLAY, metadata={"mode": mode.value})
         snapshots_raw = await get_replay_snapshots(session_id)
 
         if not snapshots_raw:
+            span_manager.end(rspan, status=SpanStatus.ERROR)
             return ReplaySession(
                 session_id=session_id,
                 correlation_id=correlation_id,
@@ -65,6 +71,7 @@ class ReplayEngine:
             session.outcome_match = match and baseline is not None
             session.world_state_snapshot["outcome_fingerprint"] = fp
             session.world_state_snapshot["baseline_fingerprint"] = baseline
+            span_manager.end(rspan, status=SpanStatus.OK if session.outcome_match else SpanStatus.ERROR)
             return session
 
         baseline_outcome = await reorchestrate_frozen_outcome(session_id, correlation_id)
@@ -79,6 +86,7 @@ class ReplayEngine:
         session.world_state_snapshot["replay_source"] = "live_tool_adapter"
         session.outcome_match = len(drift) == 0
         session.world_state_snapshot["drift_fields"] = list(drift.keys())
+        span_manager.end(rspan, status=SpanStatus.OK if session.outcome_match else SpanStatus.ERROR)
         return session
 
 

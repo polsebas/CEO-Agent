@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     db_pool_max: int = 20
     mcp_timeout_seconds: float = 3.0
     degraded_success_threshold: float = 0.7
+    runtime_health_enforcement: bool = True
+
+    otel_service_name: str = "ceo-agent"
+    otel_exporter_otlp_endpoint: str = ""
+    otel_sdk_disabled: bool = False
+    telemetry_enabled: bool = True
 
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"

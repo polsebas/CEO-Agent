@@ -50,6 +50,10 @@ Execution replay (frozen + live), baseline versionado, gates Postgres y outbox.
 - Gates: `tests/gate/test_rrm15_replay_integrity.py`, `tests/gate/test_outbox_semantics.py`
 - Postgres: `tests/integration/test_postgres_replay.py`, `tests/integration/test_postgres_outbox.py`
 
-## RRM-2 (desbloqueado)
+## RRM-2 — Runtime Intelligence ✅ CERRADO
 
-Embeddings sophistication, semantic cache tuning, advanced prompts, multi-agent delegation, timeline UI, OpenTelemetry.
+Observabilidad causal, telemetría cognitiva, health engine, context lifecycle, diagnostics API, OTel + Prometheus.
+
+- Spec: [RRM2.md](./RRM2.md)
+- Gates: `tests/gate/test_rrm2_*.py`
+- Postgres: `tests/integration/test_postgres_spans.py`, `tests/integration/test_postgres_diagnostics.py`

@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from core.canonical import stable_hash
-from core.persistence import apply_memory_runtime_persist, get_world_state
+from core.persistence import (
+    apply_memory_runtime_persist,
+    get_memory_outbox_by_idempotency,
+    get_world_state,
+)
 from core.runtime_session import MemoryConnection
-from schemas.cognition import StructuredRetryTrace
+from core.spans import drain_pending_spans
+from schemas.cognition import CognitiveTelemetry, PromptLineage, StructuredRetryTrace
 from schemas.decisions import DecisionRecord
+from schemas.diagnostics import SessionDiagnostics
 from schemas.effects import SideEffectRecord
 from schemas.runtime import OutboxEvent
+from schemas.runtime_health import RuntimeAnomaly, RuntimeHealth
+from schemas.spans import ExecutionSpan
 from schemas.world import WorldStateSnapshot
 
 
@@ -43,6 +51,13 @@ class PersistRuntimePayload:
     update_world: bool = False
     world_changed_entities: list[str] | None = None
     store_replay_baseline: bool = False
+    execution_spans: list[ExecutionSpan] = field(default_factory=list)
+    cognitive_telemetry: list[CognitiveTelemetry] = field(default_factory=list)
+    runtime_health: RuntimeHealth | None = None
+    prompt_lineage: list[PromptLineage] = field(default_factory=list)
+    runtime_anomalies: list[RuntimeAnomaly] = field(default_factory=list)
+    session_diagnostics: SessionDiagnostics | None = None
+    drain_spans: bool = True
 
 
 @dataclass
@@ -73,6 +88,90 @@ async def _fetch_outbox_by_idempotency(conn: Any, idempotency_key: str) -> Outbo
     return _row_to_outbox(row)
 
 
+def _merge_pending_spans(payload: PersistRuntimePayload) -> None:
+    if not payload.drain_spans:
+        return
+    pending = drain_pending_spans()
+    if pending:
+        payload.execution_spans = list(payload.execution_spans) + pending
+
+
+def _has_intelligence_data(payload: PersistRuntimePayload) -> bool:
+    return bool(
+        payload.execution_spans
+        or payload.cognitive_telemetry
+        or payload.runtime_health
+        or payload.prompt_lineage
+        or payload.runtime_anomalies
+        or payload.session_diagnostics
+    )
+
+
+async def _persist_intelligence(conn: Any, payload: PersistRuntimePayload) -> None:
+    if not _has_intelligence_data(payload):
+        return
+    from core.intelligence_persist import apply_intelligence_memory, persist_intelligence_postgres
+
+    if isinstance(conn, MemoryConnection):
+        apply_intelligence_memory(payload)
+    else:
+        await persist_intelligence_postgres(conn, payload)
+
+
+async def _build_session_diagnostics_only(conn: Any, payload: PersistRuntimePayload) -> None:
+    if payload.session_diagnostics is not None:
+        return
+    from core.session_diagnostics import build_session_diagnostics
+
+    payload.session_diagnostics = await build_session_diagnostics(
+        payload.session_id,
+        payload.correlation_id,
+        conn=conn,
+    )
+
+
+async def _persist_replay_baseline(conn: Any, payload: PersistRuntimePayload) -> None:
+    from core.replay_validator import build_canonical_outcome
+    from core.replay_version import ORCHESTRATOR_VERSION
+    from schemas.replay import outcome_fingerprint
+
+    outcome = await build_canonical_outcome(payload.session_id, payload.correlation_id, conn=conn)
+    fp = outcome_fingerprint(outcome)
+
+    if isinstance(conn, MemoryConnection):
+        from core.replay_store import save_baseline_record_memory
+
+        save_baseline_record_memory(
+            payload.session_id,
+            payload.correlation_id,
+            fp,
+            ORCHESTRATOR_VERSION,
+        )
+        return
+
+    await conn.execute(
+        """
+        INSERT INTO replay_baselines
+        (session_id, correlation_id, outcome_fingerprint, orchestrator_version, created_at)
+        VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (session_id) DO UPDATE SET
+            outcome_fingerprint = EXCLUDED.outcome_fingerprint,
+            orchestrator_version = EXCLUDED.orchestrator_version
+        """,
+        payload.session_id,
+        payload.correlation_id,
+        fp,
+        ORCHESTRATOR_VERSION,
+        datetime.now(timezone.utc),
+    )
+
+
+async def _complete_session_close(conn: Any, payload: PersistRuntimePayload) -> None:
+    """Baseline + diagnostics materialization before final intelligence persist."""
+    await _persist_replay_baseline(conn, payload)
+    await _build_session_diagnostics_only(conn, payload)
+
+
 async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> PersistResult:
     """Persist on the active connection — no internal pool.acquire or locks."""
     world = get_world_state()
@@ -99,30 +198,31 @@ async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> Persi
         new_state.version = world.version + 1
         world_snap = WorldStateSnapshot.from_state(new_state, payload.world_changed_entities)
 
-    if isinstance(conn, MemoryConnection):
-        apply_memory_runtime_persist(payload, event, world_snap)
-        if payload.store_replay_baseline and payload.event_type == "session.completed":
-            from core.replay_store import save_baseline_record_memory
-            from core.replay_validator import build_canonical_outcome
-            from core.replay_version import ORCHESTRATOR_VERSION
-            from schemas.replay import outcome_fingerprint
+    is_session_close = (
+        payload.store_replay_baseline and payload.event_type == "session.completed"
+    )
 
-            outcome = await build_canonical_outcome(
-                payload.session_id,
-                payload.correlation_id,
-                conn=conn,
-            )
-            save_baseline_record_memory(
-                payload.session_id,
-                payload.correlation_id,
-                outcome_fingerprint(outcome),
-                ORCHESTRATOR_VERSION,
-            )
+    if isinstance(conn, MemoryConnection):
+        existing_mem = get_memory_outbox_by_idempotency(idem)
+        if existing_mem:
+            _merge_pending_spans(payload)
+            if is_session_close:
+                await _complete_session_close(conn, payload)
+            await _persist_intelligence(conn, payload)
+            return PersistResult(event=existing_mem, inserted=False)
+        _merge_pending_spans(payload)
+        if is_session_close:
+            await _complete_session_close(conn, payload)
+        apply_memory_runtime_persist(payload, event, world_snap)
         return PersistResult(event=event, inserted=True)
 
     existing = await _fetch_outbox_by_idempotency(conn, idem)
     if existing:
+        _merge_pending_spans(payload)
+        await _persist_intelligence(conn, payload)
         return PersistResult(event=existing, inserted=False)
+
+    _merge_pending_spans(payload)
 
     if world_snap:
         await conn.execute(
@@ -216,27 +316,10 @@ async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> Persi
             payload.runtime_transition.to_state,
             datetime.now(timezone.utc),
         )
-    if payload.store_replay_baseline and payload.event_type == "session.completed":
-        from core.replay_validator import build_canonical_outcome
-        from core.replay_version import ORCHESTRATOR_VERSION
-        from schemas.replay import outcome_fingerprint
 
-        outcome = await build_canonical_outcome(payload.session_id, payload.correlation_id, conn=conn)
-        fp = outcome_fingerprint(outcome)
-        await conn.execute(
-            """
-            INSERT INTO replay_baselines
-            (session_id, correlation_id, outcome_fingerprint, orchestrator_version, created_at)
-            VALUES ($1,$2,$3,$4,$5)
-            ON CONFLICT (session_id) DO UPDATE SET
-                outcome_fingerprint = EXCLUDED.outcome_fingerprint,
-                orchestrator_version = EXCLUDED.orchestrator_version
-            """,
-            payload.session_id,
-            payload.correlation_id,
-            fp,
-            ORCHESTRATOR_VERSION,
-            datetime.now(timezone.utc),
-        )
+    if is_session_close:
+        await _complete_session_close(conn, payload)
+
+    await _persist_intelligence(conn, payload)
 
     return PersistResult(event=event, inserted=True)

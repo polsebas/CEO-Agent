@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from api.auth import AuthContext
+from api.diagnostics import router as diagnostics_router
 from core.approval_service import (
     create_immutable_proposal,
     execute_approved_action_in_session,
@@ -31,13 +32,25 @@ from schemas.runtime import ReplayMode
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from core.telemetry.otel import init_telemetry, shutdown_telemetry
+
+    init_telemetry()
     if not settings.use_in_memory_store:
         await get_pool()
         get_agent_storage()
     yield
+    shutdown_telemetry()
 
 
-app = FastAPI(title="CEO-Agent Cognitive OS", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="CEO-Agent Cognitive OS", version="0.5.0", lifespan=lifespan)
+app.include_router(diagnostics_router)
+
+
+@app.get("/metrics")
+async def metrics():
+    from core.telemetry.otel import get_prometheus_metrics_text
+
+    return Response(content=get_prometheus_metrics_text(), media_type="text/plain")
 
 
 class FounderRequest(BaseModel):

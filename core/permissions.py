@@ -16,12 +16,14 @@ class Permission(str, Enum):
     REPLAY_EXECUTE = "replay:execute"
     AGENTS_HEALTH = "agents:health"
     CRISIS_OVERRIDE = "crisis:override"
+    DIAGNOSTICS_READ = "diagnostics:read"
 
 
 ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
     UserRole.READONLY: {
         Permission.TIMELINE_READ,
         Permission.APPROVALS_READ,
+        Permission.DIAGNOSTICS_READ,
     },
     UserRole.OPERATOR: {
         Permission.FOUNDER_REQUEST,
@@ -38,6 +40,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
         Permission.APPROVALS_READ,
         Permission.REPLAY_EXECUTE,
         Permission.AGENTS_HEALTH,
+        Permission.DIAGNOSTICS_READ,
     },
     UserRole.FOUNDER: set(Permission),
 }
