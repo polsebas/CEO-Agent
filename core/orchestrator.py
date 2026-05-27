@@ -14,7 +14,6 @@ from core.context import ContextWindowManager
 from core.context_lifecycle import context_lifecycle
 from core.health import agent_health_registry
 from core.prompt_lineage import prompt_lineage_tracker
-from core.runtime_health import runtime_health_engine
 from core.spans import span_manager
 from core.persistence import get_world_state
 from core.policy import policy_engine
@@ -96,37 +95,12 @@ class ManualOrchestrator:
         telemetry: list[CognitiveTelemetry],
         tool_results: list[ToolResult],
     ) -> dict:
-        from core.persistence import query_execution_spans
-        from core.replay_validator import build_canonical_outcome
-        from core.spans import drain_pending_spans
-        from core.telemetry.otel import record_health_score
-
-        spans = await query_execution_spans(session_id, correlation_id=correlation_id, conn=conn)
-        spans = spans + drain_pending_spans()
-        await build_canonical_outcome(session_id, correlation_id, conn=conn)
-        replay_confidence = 1.0
         tool_fail = 0.0
         if tool_results:
             tool_fail = 1.0 - sum(1 for t in tool_results if t.success) / len(tool_results)
-        ctx_pressure = telemetry[-1].context_pressure if telemetry else 0.0
-        health = runtime_health_engine.compute(
-            correlation_id=correlation_id,
-            session_id=session_id,
-            telemetry=telemetry,
-            spans=spans,
-            tool_failure_rate=tool_fail,
-            replay_confidence=replay_confidence,
-            context_pressure=ctx_pressure,
-        )
-        anomalies = runtime_health_engine.detect_anomalies(health, spans=spans)
-        score = (
-            health.orchestration_health + health.cognition_stability + health.replay_confidence
-        ) / 3
-        record_health_score(score, session_id)
         return {
-            "runtime_health": health,
-            "runtime_anomalies": anomalies,
             "cognitive_telemetry": telemetry,
+            "tool_failure_rate": tool_fail,
         }
 
     async def run_founder_request(

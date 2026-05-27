@@ -44,8 +44,30 @@ async def test_diagnostics_endpoint_explainable():
 
 @pytest.mark.rrm2
 @pytest.mark.asyncio
-async def test_metrics_endpoint():
+async def test_metrics_endpoint(monkeypatch):
+    from core.telemetry import otel
+    from core.telemetry.otel import get_prometheus_metrics_text
+
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "false")
+    monkeypatch.setattr(otel.settings, "otel_sdk_disabled", False)
+    monkeypatch.setattr(otel.settings, "telemetry_enabled", True)
+    otel.shutdown_telemetry()
+    otel._initialized = False
+    otel.init_telemetry()
+    otel.record_cognitive_metrics(
+        agent_id="ceo",
+        session_id="metrics-api",
+        token_estimate=7,
+        reasoning_latency_ms=5,
+        retry_count=0,
+    )
+
+    assert "cognitive_tokens" in get_prometheus_metrics_text()
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r = await client.get("/metrics")
     assert r.status_code == 200
+    assert "cognitive_tokens" in r.text
+    otel.shutdown_telemetry()
+    otel._initialized = False

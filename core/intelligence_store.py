@@ -17,7 +17,11 @@ _in_memory_retry_traces: list[dict] = []
 
 
 def append_spans(spans: list[ExecutionSpan]) -> None:
-    _in_memory_spans.extend(spans)
+    by_id = {s.span_id: s for s in _in_memory_spans}
+    for span in spans:
+        by_id[span.span_id] = span
+    _in_memory_spans.clear()
+    _in_memory_spans.extend(by_id.values())
 
 
 def append_telemetry(rows: list[CognitiveTelemetry]) -> None:

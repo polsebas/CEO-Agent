@@ -25,6 +25,13 @@ async def reorchestrate_frozen_outcome(
     return await frozen_replay_executor.run_from_session(session_id, correlation_id, conn=conn)
 
 
+def replay_confidence_from_baseline(outcome_fp: str, baseline_fp: str | None) -> float:
+    """Derive replay confidence after baseline is available in the same close TX."""
+    if baseline_fp is None:
+        return 1.0
+    return 1.0 if outcome_fp == baseline_fp else 0.0
+
+
 async def build_canonical_outcome(
     session_id: str,
     correlation_id: str,

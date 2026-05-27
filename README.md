@@ -445,7 +445,7 @@ El VS se considera production-grade cuando:
 
 | Prioridad | Item |
 |-----------|------|
-| Should Have | OpenTelemetry tracing |
+| Done (RRM-2) | OpenTelemetry traces (OTLP) + métricas Prometheus en `/metrics` |
 | Should Have | Replay diff visualization |
 | Should Have | Approval cryptographic signing |
 | Should Have | Tests multi-worker reales (Postgres + procesos) |

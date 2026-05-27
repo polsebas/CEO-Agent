@@ -58,6 +58,7 @@ class PersistRuntimePayload:
     runtime_anomalies: list[RuntimeAnomaly] = field(default_factory=list)
     session_diagnostics: SessionDiagnostics | None = None
     drain_spans: bool = True
+    tool_failure_rate: float = 0.0
 
 
 @dataclass
@@ -127,16 +128,15 @@ async def _build_session_diagnostics_only(conn: Any, payload: PersistRuntimePayl
         payload.session_id,
         payload.correlation_id,
         conn=conn,
+        runtime_health=payload.runtime_health,
+        runtime_anomalies=payload.runtime_anomalies or None,
     )
 
 
-async def _persist_replay_baseline(conn: Any, payload: PersistRuntimePayload) -> None:
-    from core.replay_validator import build_canonical_outcome
+async def _persist_replay_baseline(
+    conn: Any, payload: PersistRuntimePayload, outcome_fp: str
+) -> None:
     from core.replay_version import ORCHESTRATOR_VERSION
-    from schemas.replay import outcome_fingerprint
-
-    outcome = await build_canonical_outcome(payload.session_id, payload.correlation_id, conn=conn)
-    fp = outcome_fingerprint(outcome)
 
     if isinstance(conn, MemoryConnection):
         from core.replay_store import save_baseline_record_memory
@@ -144,7 +144,7 @@ async def _persist_replay_baseline(conn: Any, payload: PersistRuntimePayload) ->
         save_baseline_record_memory(
             payload.session_id,
             payload.correlation_id,
-            fp,
+            outcome_fp,
             ORCHESTRATOR_VERSION,
         )
         return
@@ -160,15 +160,64 @@ async def _persist_replay_baseline(conn: Any, payload: PersistRuntimePayload) ->
         """,
         payload.session_id,
         payload.correlation_id,
-        fp,
+        outcome_fp,
         ORCHESTRATOR_VERSION,
         datetime.now(timezone.utc),
     )
 
 
+def _merge_spans_for_health(
+    stored: list[ExecutionSpan], pending: list[ExecutionSpan]
+) -> list[ExecutionSpan]:
+    by_id = {s.span_id: s for s in stored}
+    for span in pending:
+        by_id[span.span_id] = span
+    return sorted(by_id.values(), key=lambda s: s.started_at)
+
+
+async def _compute_session_close_health(conn: Any, payload: PersistRuntimePayload) -> None:
+    from core.persistence import get_replay_baseline, query_execution_spans
+    from core.replay_validator import build_canonical_outcome, replay_confidence_from_baseline
+    from core.runtime_health import runtime_health_engine
+    from core.telemetry.otel import record_health_score
+    from schemas.replay import outcome_fingerprint
+
+    baseline_fp = await get_replay_baseline(payload.session_id, conn=conn)
+    outcome = await build_canonical_outcome(
+        payload.session_id, payload.correlation_id, conn=conn
+    )
+    outcome_fp = outcome_fingerprint(outcome)
+    await _persist_replay_baseline(conn, payload, outcome_fp)
+
+    replay_confidence = replay_confidence_from_baseline(outcome_fp, baseline_fp)
+    stored_spans = await query_execution_spans(
+        payload.session_id, correlation_id=payload.correlation_id, conn=conn
+    )
+    spans = _merge_spans_for_health(stored_spans, list(payload.execution_spans or []))
+    telemetry = payload.cognitive_telemetry or []
+    ctx_pressure = telemetry[-1].context_pressure if telemetry else 0.0
+
+    health = runtime_health_engine.compute(
+        correlation_id=payload.correlation_id,
+        session_id=payload.session_id,
+        telemetry=telemetry,
+        spans=spans,
+        tool_failure_rate=payload.tool_failure_rate,
+        replay_confidence=replay_confidence,
+        context_pressure=ctx_pressure,
+    )
+    anomalies = runtime_health_engine.detect_anomalies(health, spans=spans)
+    score = (
+        health.orchestration_health + health.cognition_stability + health.replay_confidence
+    ) / 3
+    record_health_score(score, payload.session_id)
+    payload.runtime_health = health
+    payload.runtime_anomalies = anomalies
+
+
 async def _complete_session_close(conn: Any, payload: PersistRuntimePayload) -> None:
-    """Baseline + diagnostics materialization before final intelligence persist."""
-    await _persist_replay_baseline(conn, payload)
+    """Baseline-first health + diagnostics before final intelligence persist."""
+    await _compute_session_close_health(conn, payload)
     await _build_session_diagnostics_only(conn, payload)
 
 
@@ -219,6 +268,8 @@ async def persist_runtime_tx(conn: Any, payload: PersistRuntimePayload) -> Persi
     existing = await _fetch_outbox_by_idempotency(conn, idem)
     if existing:
         _merge_pending_spans(payload)
+        if is_session_close:
+            await _complete_session_close(conn, payload)
         await _persist_intelligence(conn, payload)
         return PersistResult(event=existing, inserted=False)
 

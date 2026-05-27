@@ -93,6 +93,7 @@ def init_telemetry() -> None:
 
 def shutdown_telemetry() -> None:
     global _initialized, _tracer, _meter, _prometheus_reader
+    global _cognitive_tokens, _reasoning_latency, _retry_count, _runtime_health_score
     if not _initialized:
         return
     try:
@@ -106,10 +107,25 @@ def shutdown_telemetry() -> None:
             mp.shutdown()
     except Exception:
         pass
+    try:
+        import opentelemetry.metrics._internal as metrics_internal
+        import opentelemetry.trace as trace_module
+        from opentelemetry.util._once import Once
+
+        trace_module._TRACER_PROVIDER = None
+        trace_module._TRACER_PROVIDER_SET_ONCE = Once()
+        metrics_internal._METER_PROVIDER = None
+        metrics_internal._METER_PROVIDER_SET_ONCE = Once()
+    except Exception:
+        pass
     _initialized = False
     _tracer = None
     _meter = None
     _prometheus_reader = None
+    _cognitive_tokens = None
+    _reasoning_latency = None
+    _retry_count = None
+    _runtime_health_score = None
 
 
 def get_tracer():

@@ -14,10 +14,17 @@ from core.approval_service import create_immutable_proposal, prepare_approval_in
 from core.health import agent_health_registry
 from core.orchestrator import manual_orchestrator
 from core.persistence import query_execution_spans, query_runtime_health, reset_in_memory_store
+from core.replay_store import get_baseline_fingerprint_memory, save_baseline_record_memory
+from core.replay_validator import replay_confidence_from_baseline
 from core.runtime_session import MemoryConnection
 from core.spans import span_manager
 from core.telemetry import otel
-from core.transaction import PersistRuntimePayload, _merge_pending_spans, persist_runtime_tx
+from core.transaction import (
+    PersistRuntimePayload,
+    _complete_session_close,
+    _merge_pending_spans,
+    persist_runtime_tx,
+)
 from core.intelligence_store import get_health_snapshots, get_session_diagnostics
 from httpx import ASGITransport, AsyncClient
 from schemas.spans import SpanStatus, SpanType
@@ -101,6 +108,48 @@ async def test_session_close_replay_confidence_baseline_default():
     rows = await query_runtime_health(session_id)
     assert rows
     assert rows[-1].replay_confidence == 1.0
+    baseline = get_baseline_fingerprint_memory(session_id)
+    assert baseline is not None
+    diag = get_session_diagnostics(session_id)
+    assert diag is not None
+    assert diag.runtime_health is not None
+    assert diag.runtime_health.replay_confidence == 1.0
+    assert diag.replay_summary.get("baseline") is not None
+
+
+@pytest.mark.rrm21
+def test_replay_confidence_from_baseline_helper():
+    assert replay_confidence_from_baseline("abc", None) == 1.0
+    assert replay_confidence_from_baseline("abc", "abc") == 1.0
+    assert replay_confidence_from_baseline("abc", "xyz") == 0.0
+
+
+@pytest.mark.rrm21
+@pytest.mark.asyncio
+async def test_session_close_replay_divergence_on_baseline_mismatch():
+    reset_in_memory_store()
+    session_id = "rrm21-mismatch"
+    correlation_id = "rrm21-mismatch-corr"
+    await manual_orchestrator.run_founder_request(
+        "Analyze deployment anomaly",
+        session_id=session_id,
+        correlation_id=correlation_id,
+    )
+    save_baseline_record_memory(session_id, correlation_id, "0" * 64, "rrm15-legacy")
+
+    conn = MemoryConnection()
+    payload = PersistRuntimePayload(
+        correlation_id=correlation_id,
+        session_id=session_id,
+        event_type="session.completed",
+        event_payload={"session_id": session_id, "summary": ""},
+        business_key="session.completed",
+        store_replay_baseline=True,
+    )
+    await _complete_session_close(conn, payload)
+    assert payload.runtime_health is not None
+    assert payload.runtime_health.replay_confidence == 0.0
+    assert any(a.anomaly_type == "replay_divergence" for a in payload.runtime_anomalies)
 
 
 @pytest.mark.rrm21

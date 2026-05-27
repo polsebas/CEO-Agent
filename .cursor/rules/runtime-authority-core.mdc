@@ -1,0 +1,48 @@
+---
+description: Runtime authority, replay, TX, and governance invariants for core and gate/integration tests
+globs:
+  - core/**
+  - tests/gate/**
+  - tests/integration/**
+alwaysApply: false
+---
+
+# Runtime authority (core/, tests/gate/, tests/integration/)
+
+Before any change under `core/`, `tests/gate/`, or `tests/integration/`, read and follow:
+
+`.agents/skills/runtime-reliability-architecture/SKILL.md`
+
+Enforceable checklist: `docs/runtime_invariants.md`
+
+## Authority (non-negotiable)
+
+- **ManualOrchestrator** + **persist_runtime_tx** + advisory lock are the only mutation path.
+- **Agno** (and any cognition adapter) is non-authoritative: no direct state mutation, no bypassing policy, no replay truth.
+- Mutations: `pg_advisory_xact_lock` → single TX → `persist_runtime_tx` → replay-compatible artifacts → idempotency preserved.
+
+## Forbidden in production paths
+
+- Direct memory-store writes, dual-write, hidden persistence, background mutations outside replay visibility
+- Bypassing orchestrator, policy, or governance (`JWT → PermissionMatrix → PolicyEngine → ApprovalBinding → Runtime TX`)
+- Live replay mutating authoritative snapshots; intelligence layer altering execution semantics
+
+## Pre-change gate (§16)
+
+If any answer is unclear, **STOP** and refactor:
+
+1. Replayable deterministically?
+2. Diagnosable operationally?
+3. Preserves runtime authority?
+4. Preserves transactional integrity?
+5. Observable and versionable?
+6. Could create hidden state?
+7. Could bypass governance?
+
+## Testing expectation
+
+Gate/integration tests for replay, concurrency, and diagnostics — not only unit happy paths. Success = reproducible session under concurrency without corruption.
+
+## Priority order
+
+Correctness → replay → governance → determinism → diagnostics → cognition → performance → scale.

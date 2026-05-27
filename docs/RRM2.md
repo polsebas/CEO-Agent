@@ -37,15 +37,25 @@ La Runtime Intelligence Layer observa y diagnostica; **no** reemplaza `ManualOrc
 | `GET /api/v1/replay/{id}/analysis` | `DIAGNOSTICS_READ` |
 | `GET /metrics` | público (Prometheus text) |
 
-## OpenTelemetry
+## OpenTelemetry y Prometheus
+
+Contrato de runtime:
+
+| Señal | Export | Config |
+|-------|--------|--------|
+| Métricas cognitivas / health | Scrape `GET /metrics` (texto Prometheus) | `TELEMETRY_ENABLED`, `OTEL_SDK_DISABLED` |
+| Traces | OTLP HTTP (opcional) | `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| Métricas vía OTLP | **No soportado** | — |
 
 ```env
-OTEL_EXPORTER_OTLP_ENDPOINT=
-OTEL_SERVICE_NAME=ceo-agent
+TELEMETRY_ENABLED=true
 OTEL_SDK_DISABLED=false
+OTEL_SERVICE_NAME=ceo-agent
+OTEL_EXPORTER_OTLP_ENDPOINT=
 ```
 
-En pytest/CI: `OTEL_SDK_DISABLED=true`.
+- `TELEMETRY_ENABLED=false` o `OTEL_SDK_DISABLED=true`: el SDK no inicializa meter/tracer; `/metrics` puede responder vacío o solo defaults de `prometheus_client`.
+- En pytest/CI: `OTEL_SDK_DISABLED=true` (salvo tests que habilitan OTel vía `monkeypatch`).
 
 ## Gates
 

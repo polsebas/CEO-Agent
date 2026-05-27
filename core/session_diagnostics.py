@@ -13,6 +13,7 @@ from core.persistence import (
 )
 from core.intelligence_store import get_anomalies
 from schemas.diagnostics import SessionDiagnostics
+from schemas.runtime_health import RuntimeAnomaly, RuntimeHealth
 from schemas.spans import SpanType
 
 
@@ -21,20 +22,25 @@ async def build_session_diagnostics(
     correlation_id: str,
     *,
     conn: Any | None = None,
+    runtime_health: RuntimeHealth | None = None,
+    runtime_anomalies: list[RuntimeAnomaly] | None = None,
 ) -> SessionDiagnostics:
     from core.config import settings
     from core.runtime_session import MemoryConnection
 
     spans = await query_execution_spans(session_id, correlation_id=correlation_id, conn=conn)
     telemetry = await query_cognitive_telemetry(session_id, correlation_id=correlation_id, conn=conn)
-    health_rows = await query_runtime_health(session_id, conn=conn)
-    health = health_rows[-1] if health_rows else None
+    if runtime_health is not None:
+        health = runtime_health
+    else:
+        health_rows = await query_runtime_health(session_id, conn=conn)
+        health = health_rows[-1] if health_rows else None
 
-    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+    if runtime_anomalies is not None:
+        anomalies = runtime_anomalies
+    elif settings.use_in_memory_store or isinstance(conn, MemoryConnection):
         anomalies = get_anomalies(session_id)
     else:
-        from schemas.runtime_health import RuntimeAnomaly
-
         anomalies = []
         if conn is not None:
             rows = await conn.fetch(
