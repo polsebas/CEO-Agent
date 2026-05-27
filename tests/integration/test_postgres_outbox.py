@@ -23,6 +23,10 @@ async def test_postgres_outbox_two_workers_no_double_process(postgres_available)
     corr = f"pg-outbox-corr-{uuid4()}"
     now = datetime.now(timezone.utc)
 
+    # Session/replay integration tests leave unprocessed rows; isolate this probe.
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM outbox_events WHERE processed = FALSE")
+
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -41,7 +45,7 @@ async def test_postgres_outbox_two_workers_no_double_process(postgres_available)
     async def worker() -> int:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                return await process_outbox_batch(conn, limit=10)
+                return await process_outbox_batch(conn, limit=1)
 
     first, second = await asyncio.gather(worker(), worker())
     assert first + second == 1
