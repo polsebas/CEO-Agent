@@ -1,9 +1,14 @@
-"""Replay engine — frozen uses historical snapshots only."""
+"""Replay engine — frozen baseline compare; live drift detection."""
 
 from __future__ import annotations
 
-from schemas.runtime import ReplayMode, ReplaySession, ReplaySnapshot, RuntimeState
+from datetime import datetime, timezone
+
+from core.replay_diff import diff_canonical_outcomes
+from core.replay_validator import prompt_hash, reorchestrate_frozen_outcome, validate_frozen_replay
 from core.persistence import get_replay_snapshots
+from schemas.replay import outcome_fingerprint
+from schemas.runtime import ReplayMode, ReplaySession, ReplaySnapshot, RuntimeState
 
 
 class ReplayEngine:
@@ -12,6 +17,8 @@ class ReplayEngine:
         session_id: str,
         correlation_id: str,
         mode: ReplayMode = ReplayMode.FROZEN,
+        *,
+        live_tool_mutator=None,
     ) -> ReplaySession:
         snapshots_raw = await get_replay_snapshots(session_id)
 
@@ -35,48 +42,41 @@ class ReplayEngine:
             snapshots=[],
         )
 
-        if mode == ReplayMode.FROZEN:
-            for i, snap in enumerate(snapshots_raw):
-                tool_outputs = {}
-                for tr in snap.get("tool_results", []):
-                    if isinstance(tr, dict) and "tool_name" in tr:
-                        tool_outputs[tr["tool_name"]] = tr
-                    elif isinstance(tr, dict):
-                        tool_outputs[f"tool_{i}"] = tr
-                legacy = snap.get("tool_outputs", {})
-                tool_outputs.update(legacy)
+        for i, snap in enumerate(snapshots_raw):
+            tool_outputs = {}
+            for tr in snap.get("tool_results", []):
+                if isinstance(tr, dict) and "tool_name" in tr:
+                    tool_outputs[tr["tool_name"]] = tr
+            legacy = snap.get("tool_outputs", {})
+            tool_outputs.update(legacy)
 
-                session.snapshots.append(
-                    ReplaySnapshot(
-                        step=i,
-                        runtime_state=RuntimeState(snap.get("runtime_state", "completed")),
-                        prompt_hash=str(hash(snap.get("prompt", "")))[:16],
-                        tool_outputs=tool_outputs,
-                        world_state_version=snap.get("world_state_version", ws_version),
-                        timestamp=snap.get("timestamp") or __import__("datetime").datetime.utcnow(),
-                    )
+            session.snapshots.append(
+                ReplaySnapshot(
+                    step=i,
+                    runtime_state=RuntimeState(snap.get("runtime_state", "completed")),
+                    prompt_hash=prompt_hash(snap.get("prompt", "")),
+                    tool_outputs=tool_outputs,
+                    world_state_version=snap.get("world_state_version", ws_version),
+                    timestamp=snap.get("timestamp") or datetime.now(timezone.utc),
                 )
-            session.outcome_match = len(snapshots_raw) > 0 and all(
-                s.get("response") or s.get("tool_results") for s in snapshots_raw
             )
+
+        if mode == ReplayMode.FROZEN:
+            match, fp, baseline = await validate_frozen_replay(session_id, correlation_id)
+            session.outcome_match = match and baseline is not None
+            session.world_state_snapshot["outcome_fingerprint"] = fp
+            session.world_state_snapshot["baseline_fingerprint"] = baseline
             return session
 
-        last = snapshots_raw[-1]
-        session.snapshots.append(
-            ReplaySnapshot(
-                step=0,
-                runtime_state=RuntimeState(last.get("runtime_state", "completed")),
-                prompt_hash="live_from_last_snapshot",
-                tool_outputs={
-                    tr.get("tool_name", f"tool_{idx}"): tr
-                    for idx, tr in enumerate(last.get("tool_results", []))
-                    if isinstance(tr, dict)
-                },
-                world_state_version=last.get("world_state_version", ws_version),
-                timestamp=__import__("datetime").datetime.utcnow(),
-            )
-        )
-        session.outcome_match = bool(last.get("response"))
+        baseline_outcome = await reorchestrate_frozen_outcome(session_id, correlation_id)
+        if live_tool_mutator:
+            live_tool_mutator(snapshots_raw)
+        live_outcome = await reorchestrate_frozen_outcome(session_id, correlation_id)
+        drift = diff_canonical_outcomes(baseline_outcome, live_outcome)
+        session.world_state_snapshot["expected_fingerprint"] = outcome_fingerprint(baseline_outcome)
+        session.world_state_snapshot["live_fingerprint"] = outcome_fingerprint(live_outcome)
+        session.outcome_match = len(drift) == 0
+        session.world_state_snapshot["drift_fields"] = list(drift.keys())
         return session
 
 

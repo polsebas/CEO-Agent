@@ -1,0 +1,44 @@
+name: RRM1 Gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  unit-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/unit tests/governance tests/experimental tests/integration tests/gate tests/vertical_slice -q --tb=short
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ceo
+          POSTGRES_PASSWORD: ceo
+          POSTGRES_DB: ceo_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/integration/test_postgres_session.py -q --tb=short
+        env:
+          DATABASE_URL: postgresql://ceo:ceo@localhost:5432/ceo_agent
+          USE_IN_MEMORY_STORE: "false"

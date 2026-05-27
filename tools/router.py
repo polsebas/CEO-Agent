@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.cache import cache_get, cache_set
-from core.config import settings
+from core.canonical import canonical_json
 from core.policy import PolicyDecision, policy_engine
 from schemas.approvals import ActionProposal
 from schemas.tools import ToolResult
@@ -41,15 +41,21 @@ TOOL_HANDLERS = {
 CACHEABLE = {"list_github_prs", "get_repo_health", "read_kpi_dashboard", "calculate_runway", "get_cashflow_summary"}
 
 
+def _canonical_params(params: dict | None) -> dict:
+    if not params:
+        return {}
+    import json
+
+    return json.loads(canonical_json(params, strip_volatile=False))
+
+
 async def execute_tool(
     tool_name: str,
     agent_id: str,
     correlation_id: str,
     params: dict | None = None,
-    *,
-    skip_policy: bool = False,
 ) -> ToolResult:
-    params = params or {}
+    params = _canonical_params(params)
     cap = tool_registry.get(tool_name)
     if not cap:
         return ToolResult(
@@ -70,7 +76,7 @@ async def execute_tool(
             correlation_id=correlation_id,
         )
 
-    if not skip_policy and cap.side_effect_level >= 2:
+    if cap.side_effect_level >= 2:
         proposal = ActionProposal(
             task_id=correlation_id,
             agent=agent_id,

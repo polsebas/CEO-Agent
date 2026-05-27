@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from schemas.runtime import VALID_TRANSITIONS, RuntimeState
@@ -30,7 +30,7 @@ class RuntimeStateMachine:
         if target not in allowed and self.state != target:
             raise InvalidStateTransition(self.state, target)
         self.state = target
-        self.history.append((target, datetime.utcnow()))
+        self.history.append((target, datetime.now(timezone.utc)))
         return self.state
 
     def start(self) -> RuntimeState:
@@ -46,7 +46,7 @@ class RuntimeStateMachine:
         return None
 
     def fail(self, reason: str = "") -> RuntimeState:
-        self.history.append((RuntimeState.FAILED, datetime.utcnow()))
+        self.history.append((RuntimeState.FAILED, datetime.now(timezone.utc)))
         self.state = RuntimeState.FAILED
         return self.state
 

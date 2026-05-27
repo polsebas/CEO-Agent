@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from schemas.cognition import StructuredRetryTrace
 from schemas.responses.base import parse_structured_response, reset_retry_counter
-from schemas.runtime import CognitiveBudget, RuntimeState
+from schemas.runtime import CognitiveBudget
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -21,28 +23,56 @@ class StructuredAgentRunner:
         response_model: type[T],
         correlation_id: str,
         *,
+        session_id: str = "",
+        agent_id: str = "ceo",
+        step_id: int = 0,
         budget: CognitiveBudget | None = None,
-    ) -> tuple[T, RuntimeState]:
+    ) -> tuple[T, StructuredRetryTrace]:
         budget = budget or CognitiveBudget()
         reset_retry_counter(correlation_id)
+        trace = StructuredRetryTrace(
+            correlation_id=correlation_id,
+            session_id=session_id or correlation_id,
+            agent_id=agent_id,
+            step_id=step_id,
+            created_at=datetime.now(timezone.utc),
+        )
         model = getattr(agent, "model", None)
+        llm_attempts = 0
 
         if model is not None:
             try:
                 run_response = await agent.arun(prompt, output_schema=response_model)
+                llm_attempts = 1
                 content = getattr(run_response, "content", None)
                 if isinstance(content, response_model):
-                    return content, RuntimeState.REASONING
+                    trace.llm_retry_triggered = llm_attempts > 1
+                    return content, trace
                 if content is not None:
                     raw = content if isinstance(content, str) else json.dumps(content)
-                    parsed = parse_structured_response(raw, response_model, correlation_id)
-                    return parsed, RuntimeState.REASONING
-            except Exception:
-                pass
+                    try:
+                        parsed = parse_structured_response(raw, response_model, correlation_id)
+                        trace.llm_retry_triggered = llm_attempts > 1
+                        return parsed, trace
+                    except (ValidationError, ValueError) as exc:
+                        trace.validation_error = str(exc)
+                        trace.repair_attempts += 1
+                        trace.llm_retry_triggered = True
+            except Exception as exc:
+                trace.validation_error = str(exc)
+                trace.final_failure_reason = str(exc)
+                trace.llm_retry_triggered = llm_attempts > 1
 
         fallback = self._deterministic_fallback(prompt, response_model, budget)
-        parsed = parse_structured_response(fallback, response_model, correlation_id)
-        return parsed, RuntimeState.REASONING
+        try:
+            parsed = parse_structured_response(fallback, response_model, correlation_id)
+            return parsed, trace
+        except (ValidationError, ValueError) as exc:
+            trace.validation_error = str(exc)
+            trace.repair_attempts += 1
+            trace.final_failure_reason = str(exc)
+            trace.llm_retry_triggered = llm_attempts > 0
+            return response_model.model_validate(json.loads(fallback)), trace
 
     def _deterministic_fallback(
         self,

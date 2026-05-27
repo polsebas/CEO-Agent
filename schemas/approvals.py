@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
 
@@ -26,7 +26,7 @@ class Task(BaseModel):
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
     dependencies: list[str] = Field(default_factory=list)
     correlation_id: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ApprovalStatus(str, Enum):
@@ -61,6 +61,18 @@ class ImmutableActionProposal(BaseModel):
     expires_at: datetime
 
 
+class ApprovalBinding(BaseModel):
+    approval_id: str
+    correlation_id: str
+    tool_name: str
+    action_hash: str
+    parameters_hash: str
+    world_state_version: int | None = None
+    approved_by: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime
+
+
 class Approval(BaseModel):
     id: str
     task_id: str
@@ -73,3 +85,4 @@ class Approval(BaseModel):
     immutable_proposal: ImmutableActionProposal | None = None
     approved_by: str | None = None
     approved_at: datetime | None = None
+    binding: ApprovalBinding | None = None

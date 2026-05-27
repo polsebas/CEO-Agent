@@ -7,7 +7,9 @@ from httpx import ASGITransport, AsyncClient
 
 from api.auth import UserRole, create_test_token
 from api.main import app
-from core.approval_service import create_immutable_proposal, prepare_approval
+from core.approval_service import create_immutable_proposal, prepare_approval_in_session, proposal_checksum
+from core.governance_store import load_approval, save_approval
+from core.runtime_session import run_mutative_session
 from core.config import settings
 from core.persistence import reset_in_memory_store
 from core.policy import policy_engine
@@ -60,12 +62,15 @@ async def test_expired_approval_rejected(monkeypatch):
             },
         )
         approval_id = prepare.json()["id"]
-        approval = policy_engine.get_approval(approval_id)
-        assert approval is not None
-        approval.immutable_proposal.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-        from core.approval_service import proposal_checksum
 
-        approval.immutable_proposal.checksum = proposal_checksum(approval.immutable_proposal)
+        async def _expire(conn):
+            approval = await load_approval(conn, approval_id)
+            assert approval is not None
+            approval.immutable_proposal.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            approval.immutable_proposal.checksum = proposal_checksum(approval.immutable_proposal)
+            await save_approval(conn, approval)
+
+        await run_mutative_session("exp-corr", _expire)
         resp = await client.post(f"/api/v1/actions/approve/{approval_id}", json={"approved_by": "founder"})
         assert resp.status_code == 400
         assert "expired" in resp.json()["detail"].lower()
@@ -86,7 +91,7 @@ async def test_checksum_tamper_detected():
     )
     proposal.checksum = "deadbeef"
     with pytest.raises(ValueError, match="checksum"):
-        await prepare_approval(proposal, "ceo")
+        await prepare_approval_in_session(proposal, "ceo")
 
 
 @pytest.mark.asyncio

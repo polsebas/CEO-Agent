@@ -1,6 +1,6 @@
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -51,7 +51,7 @@ class WorldStateSnapshot(BaseModel):
         checksum = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         return cls(
             version=state.version,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             changed_entities=changed_entities or [],
             checksum=checksum,
             state=state,
@@ -84,7 +84,7 @@ def default_world_state() -> WorldState:
                 service="api-gateway",
                 version="v2.4.1",
                 status="degraded",
-                deployed_at=datetime.utcnow(),
+                deployed_at=datetime.now(timezone.utc),
             )
         ],
     )

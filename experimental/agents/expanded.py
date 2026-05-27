@@ -1,13 +1,15 @@
-"""Expanded specialist delegation for post-gate agents."""
+"""Experimental specialist agents — NOT part of production runtime (RRM-1)."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
+from core.agent_registry import AgentDisabledError, assert_agent_active
 from core.confidence import calibrate_confidence
 from core.orchestrator import manual_orchestrator
-from core.persistence import append_outbox_event, save_decision
+from core.runtime_session import run_mutative_session
+from core.transaction import PersistRuntimePayload, persist_runtime_tx
 from schemas.decisions import DecisionRecord
 from schemas.messages import AgentMessage, AgentRole
 from schemas.responses import CFOResponse, CMOResponse, COOResponse
@@ -16,9 +18,10 @@ from tools.router import execute_tool
 
 
 async def delegate_to_cfo(message: AgentMessage, session_id: str) -> dict:
+    assert_agent_active("cfo")
     sm = manual_orchestrator._make_state_machine(message.correlation_id, session_id)
-    cashflow = await execute_tool("get_cashflow_summary", "cfo", message.correlation_id, skip_policy=True)
-    runway = await execute_tool("calculate_runway", "cfo", message.correlation_id, skip_policy=True)
+    cashflow = await execute_tool("get_cashflow_summary", "cfo", message.correlation_id)
+    runway = await execute_tool("calculate_runway", "cfo", message.correlation_id)
     response = CFOResponse(
         summary=f"Financial analysis: {message.payload.get('objective', '')}",
         cashflow_status="negative" if (cashflow.data or {}).get("net_cashflow", 0) < 0 else "positive",
@@ -29,9 +32,10 @@ async def delegate_to_cfo(message: AgentMessage, session_id: str) -> dict:
 
 
 async def delegate_to_coo(message: AgentMessage, session_id: str) -> dict:
+    assert_agent_active("coo")
     sm = manual_orchestrator._make_state_machine(message.correlation_id, session_id)
-    blockers = await execute_tool("detect_blockers", "coo", message.correlation_id, skip_policy=True)
-    tasks = await execute_tool("list_active_tasks", "coo", message.correlation_id, skip_policy=True)
+    blockers = await execute_tool("detect_blockers", "coo", message.correlation_id)
+    tasks = await execute_tool("list_active_tasks", "coo", message.correlation_id)
     response = COOResponse(
         summary=f"Operations review: {message.payload.get('objective', '')}",
         blockers=(blockers.data or {}).get("blockers", []),
@@ -42,8 +46,9 @@ async def delegate_to_coo(message: AgentMessage, session_id: str) -> dict:
 
 
 async def delegate_to_cmo(message: AgentMessage, session_id: str) -> dict:
+    assert_agent_active("cmo")
     sm = manual_orchestrator._make_state_machine(message.correlation_id, session_id)
-    analytics = await execute_tool("get_analytics_summary", "cmo", message.correlation_id, skip_policy=True)
+    analytics = await execute_tool("get_analytics_summary", "cmo", message.correlation_id)
     response = CMOResponse(
         summary=f"Growth analysis: {message.payload.get('objective', '')}",
         campaign_status="2 active campaigns",
@@ -73,15 +78,23 @@ async def _save_specialist_result(
         outcome="success",
         agent=agent_id,
         runtime_state=sm.state,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
-    await save_decision(decision)
-    await append_outbox_event(
-        correlation_id=message.correlation_id,
-        causation_id=message.id,
-        event_type="decision.recorded",
-        payload=decision.model_dump(mode="json"),
-    )
+    async def _persist(conn):
+        await persist_runtime_tx(
+            conn,
+            PersistRuntimePayload(
+                correlation_id=message.correlation_id,
+                session_id=session_id,
+                event_type="decision.recorded",
+                event_payload=decision.model_dump(mode="json"),
+                causation_id=message.id,
+                decision=decision,
+                business_key=f"decision:{decision.id}",
+            ),
+        )
+
+    await run_mutative_session(session_id, _persist)
     sm.transition(RuntimeState.COMPLETED)
     return {"decision_id": decision.id, "summary": summary, "structured_response": structured}
 

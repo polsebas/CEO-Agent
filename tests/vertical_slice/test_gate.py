@@ -35,7 +35,8 @@ async def test_deterministic_github_request():
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("mode") == "deterministic"
-        assert data["result"]["success"] is True
+        tool_result = data.get("result", {})
+        assert tool_result.get("success") is True
 
 
 @pytest.mark.asyncio
@@ -152,10 +153,12 @@ async def test_agent_health_degraded_mode():
 
 @pytest.mark.asyncio
 async def test_side_effect_partial_detection():
-    from datetime import datetime
+    from datetime import datetime, timezone
     from uuid import uuid4
 
-    from core.persistence import get_effects_by_correlation, save_side_effect
+    from core.persistence import get_effects_by_correlation
+    from core.runtime_session import run_mutative_session
+    from core.transaction import PersistRuntimePayload, persist_runtime_tx
     from schemas.effects import SideEffectRecord
 
     corr = str(uuid4())
@@ -166,29 +169,38 @@ async def test_side_effect_partial_detection():
         systems_affected=["github", "ci"],
         mutation_status="partial",
         rollback_available=True,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
-    await save_side_effect(effect)
+
+    async def _persist(conn):
+        await persist_runtime_tx(
+            conn,
+            PersistRuntimePayload(
+                correlation_id=corr,
+                session_id=corr,
+                event_type="side_effect.recorded",
+                event_payload=effect.model_dump(mode="json"),
+                side_effect=effect,
+                business_key=f"effect:{effect.id}",
+            ),
+        )
+
+    await run_mutative_session(corr, _persist)
     effects = await get_effects_by_correlation(corr)
     assert effects[0].mutation_status == "partial"
 
 
 @pytest.mark.asyncio
-async def test_expanded_agents():
-    from agents.expanded import delegate_to_cfo, delegate_to_coo, delegate_to_cmo
-    from schemas.messages import AgentMessage, AgentRole, MessageIntent
+async def test_canonical_replay_fingerprint_stable():
+    from core.replay_validator import validate_frozen_replay
 
-    corr = str(uuid4())
-    sid = str(uuid4())
-    msg = lambda role: AgentMessage(
-        id=str(uuid4()),
-        sender=AgentRole.CEO,
-        receiver=role,
-        intent=MessageIntent.DELEGATION,
-        payload={"objective": "test"},
-        correlation_id=corr,
+    reset_in_memory_store()
+    await manual_orchestrator.run_founder_request(
+        "Analyze deployment anomaly",
+        session_id="fp-session",
+        correlation_id="fp-corr",
     )
-    cfo = await delegate_to_cfo(msg(AgentRole.CFO), sid)
-    coo = await delegate_to_coo(msg(AgentRole.COO), sid)
-    cmo = await delegate_to_cmo(msg(AgentRole.CMO), sid)
-    assert "summary" in cfo and "summary" in coo and "summary" in cmo
+    match, fp, baseline = await validate_frozen_replay("fp-session", "fp-corr")
+    assert baseline is not None
+    assert match is True
+    assert fp == baseline

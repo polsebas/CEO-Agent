@@ -10,19 +10,23 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from api.auth import AuthContext, UserRole, require_auth, require_role
-from core.approval_service import create_immutable_proposal, execute_approved_action, prepare_approval
+from api.auth import AuthContext
+from core.approval_service import (
+    create_immutable_proposal,
+    execute_approved_action_in_session,
+    prepare_approval_in_session,
+)
 from core.config import settings
 from core.orchestrator import manual_orchestrator
 from core.persistence import get_pool, health_check_db
+from core.permissions import Permission
 from core.policy import policy_engine
 from core.preprocessor import preprocessor
+from core.rbac import can_approve_level, require_permission
 from core.replay import replay_engine
 from core.storage import get_agent_storage
 from core.timeline import build_executive_timeline
-from schemas.approvals import ActionProposal, ImmutableActionProposal
 from schemas.runtime import ReplayMode
-from tools.router import execute_tool
 
 
 @asynccontextmanager
@@ -33,7 +37,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="CEO-Agent Cognitive OS", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="CEO-Agent Cognitive OS", version="0.4.0", lifespan=lifespan)
 
 
 class FounderRequest(BaseModel):
@@ -55,6 +59,7 @@ class PrepareRequest(BaseModel):
 
 class ApproveRequest(BaseModel):
     approved_by: str = "founder"
+    session_id: str | None = None
 
 
 @app.get("/health")
@@ -73,13 +78,12 @@ async def health():
 @app.post("/api/v1/founder/request")
 async def founder_request(
     body: FounderRequest,
-    auth: Annotated[AuthContext, Depends(require_role(UserRole.FOUNDER))],
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.FOUNDER_REQUEST))],
 ):
     pre = preprocessor.process(body.message)
+    preprocessor_hint = None
     if pre.tool_name and pre.tier.value in ("tier1_regex", "tier2_embedding"):
-        if pre.tool_name.startswith("delegate_"):
-            pass
-        elif pre.tool_name in (
+        if not pre.tool_name.startswith("delegate_") and pre.tool_name in (
             "list_github_prs",
             "get_repo_health",
             "calculate_runway",
@@ -88,29 +92,33 @@ async def founder_request(
             "detect_blockers",
             "get_analytics_summary",
         ):
-            correlation_id = body.correlation_id or str(uuid4())
             agent = "cto" if "github" in pre.tool_name or "repo" in pre.tool_name else "ceo"
-            result = await execute_tool(pre.tool_name, agent, correlation_id, pre.params)
-            return {
-                "mode": "deterministic",
+            preprocessor_hint = {
+                "tool_name": pre.tool_name,
+                "agent_id": agent,
+                "params": pre.params,
                 "tier": pre.tier.value,
-                "correlation_id": correlation_id,
-                "result": result.model_dump(),
             }
 
     result = await manual_orchestrator.run_founder_request(
         body.message,
         session_id=body.session_id,
         correlation_id=body.correlation_id,
+        preprocessor_hint=preprocessor_hint,
     )
+    if preprocessor_hint:
+        result["mode"] = "deterministic"
+        result["tier"] = preprocessor_hint.get("tier")
     return result
 
 
 @app.post("/api/v1/actions/prepare")
 async def prepare_action(
     body: PrepareRequest,
-    auth: Annotated[AuthContext, Depends(require_role(UserRole.FOUNDER))],
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.ACTION_PREPARE))],
 ):
+    if not can_approve_level(auth.role, body.approval_level):
+        raise HTTPException(status_code=403, detail="Insufficient approval level for prepare")
     proposal = create_immutable_proposal(
         correlation_id=body.correlation_id,
         action=body.action,
@@ -124,7 +132,7 @@ async def prepare_action(
         task_id=body.task_id,
     )
     try:
-        approval = await prepare_approval(proposal, requester_agent=body.agent)
+        approval = await prepare_approval_in_session(proposal, requester_agent=body.agent)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return approval.model_dump()
@@ -134,28 +142,34 @@ async def prepare_action(
 async def approve_action(
     approval_id: str,
     body: ApproveRequest,
-    auth: Annotated[AuthContext, Depends(require_role(UserRole.FOUNDER))],
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.ACTION_APPROVE))],
 ):
-    approval = policy_engine.get_approval(approval_id)
-    if not approval or approval.status.value != "pending":
-        raise HTTPException(status_code=404, detail="Approval not found or already processed")
-    policy_engine.approve(approval_id, auth.user_id)
+    approval = await policy_engine.get_approval(approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if not can_approve_level(auth.role, approval.risk_level):
+        raise HTTPException(status_code=403, detail=f"Role cannot approve level {approval.risk_level}")
     try:
-        result = await execute_approved_action(approval, approved_by=auth.user_id)
+        result = await execute_approved_action_in_session(
+            approval_id,
+            approved_by=auth.user_id,
+            session_id=body.session_id or approval.correlation_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result
 
 
 @app.get("/api/v1/approvals")
-async def list_approvals(auth: Annotated[AuthContext, Depends(require_role(UserRole.READONLY))]):
-    return [a.model_dump() for a in policy_engine.list_pending_approvals()]
+async def list_approvals(auth: Annotated[AuthContext, Depends(require_permission(Permission.APPROVALS_READ))]):
+    pending = await policy_engine.list_pending_approvals()
+    return [a.model_dump() for a in pending]
 
 
 @app.get("/api/v1/replay/{session_id}")
 async def replay_session(
     session_id: str,
-    auth: Annotated[AuthContext, Depends(require_role(UserRole.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.REPLAY_EXECUTE))],
     correlation_id: str = Query(...),
     mode: ReplayMode = Query(ReplayMode.FROZEN),
 ):
@@ -165,17 +179,30 @@ async def replay_session(
 
 @app.get("/api/v1/timeline")
 async def executive_timeline(
-    auth: Annotated[AuthContext, Depends(require_role(UserRole.READONLY))],
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.TIMELINE_READ))],
     correlation_id: str = Query(...),
 ):
     return await build_executive_timeline(correlation_id)
 
 
 @app.get("/api/v1/agents/health")
-async def agents_health(auth: Annotated[AuthContext, Depends(require_role(UserRole.ADMIN))]):
+async def agents_health(auth: Annotated[AuthContext, Depends(require_permission(Permission.AGENTS_HEALTH))]):
     from core.health import agent_health_registry
 
     return {k: v.model_dump() for k, v in (await agent_health_registry.all_agents()).items()}
+
+
+@app.get("/api/v1/sessions/{session_id}/context-metrics")
+async def context_metrics(
+    session_id: str,
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.TIMELINE_READ))],
+    correlation_id: str = Query(...),
+):
+    from core.persistence import get_replay_snapshots
+
+    snaps = await get_replay_snapshots(session_id)
+    metrics = [snap["context_fingerprint"] for snap in snaps if snap.get("context_fingerprint")]
+    return {"session_id": session_id, "correlation_id": correlation_id, "fingerprints": metrics}
 
 
 def create_playground_app():

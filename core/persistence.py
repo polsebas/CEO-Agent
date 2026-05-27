@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from schemas.decisions import DecisionRecord
@@ -96,6 +96,57 @@ async def init_schema(pool) -> None:
                 data JSONB NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS structured_retry_traces (
+                id SERIAL PRIMARY KEY,
+                correlation_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                step_id INT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                UNIQUE (correlation_id, session_id, agent_id, step_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS runtime_transitions (
+                id SERIAL PRIMARY KEY,
+                correlation_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                from_state TEXT NOT NULL,
+                to_state TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS governance_audit_events (
+                id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS approvals (
+                id TEXT PRIMARY KEY,
+                correlation_id TEXT NOT NULL,
+                action_hash TEXT NOT NULL,
+                data JSONB NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL,
+                UNIQUE (action_hash)
+            );
+
+            CREATE TABLE IF NOT EXISTS replay_baselines (
+                session_id TEXT PRIMARY KEY,
+                correlation_id TEXT NOT NULL,
+                outcome_fingerprint TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS processed_idempotency (
+                idempotency_key TEXT PRIMARY KEY,
+                processed_at TIMESTAMPTZ NOT NULL
+            );
             """
         )
 
@@ -114,6 +165,7 @@ def update_world_state(state: WorldState, changed_entities: list[str] | None = N
 
 
 async def persist_execution_bundle(
+    conn,
     *,
     correlation_id: str,
     event_type: str,
@@ -121,129 +173,68 @@ async def persist_execution_bundle(
     decision: DecisionRecord | None = None,
     side_effect: SideEffectRecord | None = None,
     causation_id: str | None = None,
+    session_id: str | None = None,
 ) -> OutboxEvent:
-    """Atomic decision + side effect + outbox append in a single transaction."""
-    event = OutboxEvent(
-        id=str(uuid4()),
-        idempotency_key=f"{correlation_id}:{event_type}:{uuid4()}",
-        correlation_id=correlation_id,
-        causation_id=causation_id,
-        event_type=event_type,
-        payload=event_payload,
-        world_state_version=get_world_state().version,
-        created_at=datetime.utcnow(),
-    )
-    if decision:
-        _in_memory_decisions.append(decision)
-    if side_effect:
-        _in_memory_effects.append(side_effect)
-    _in_memory_outbox.append(event)
+    from core.transaction import PersistRuntimePayload, persist_runtime_tx
 
-    pool = await get_pool()
-    if pool:
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                if decision:
-                    await conn.execute(
-                        "INSERT INTO decision_records (id, correlation_id, data, created_at) VALUES ($1,$2,$3::jsonb,$4)",
-                        decision.id,
-                        decision.correlation_id,
-                        decision.model_dump_json(),
-                        decision.created_at,
-                    )
-                if side_effect:
-                    await conn.execute(
-                        "INSERT INTO side_effect_records (id, correlation_id, data, created_at) VALUES ($1,$2,$3::jsonb,$4)",
-                        side_effect.id,
-                        side_effect.correlation_id,
-                        side_effect.model_dump_json(),
-                        side_effect.created_at,
-                    )
-                await conn.execute(
-                    """
-                    INSERT INTO outbox_events
-                    (id, idempotency_key, correlation_id, causation_id, event_type, payload, world_state_version, processed, created_at)
-                    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,FALSE,$8)
-                    """,
-                    event.id,
-                    event.idempotency_key,
-                    event.correlation_id,
-                    event.causation_id,
-                    event.event_type,
-                    json.dumps(event.payload),
-                    event.world_state_version,
-                    event.created_at,
-                )
-    return event
+    sid = session_id or correlation_id
+    result = await persist_runtime_tx(
+        conn,
+        PersistRuntimePayload(
+            correlation_id=correlation_id,
+            session_id=sid,
+            event_type=event_type,
+            event_payload=event_payload,
+            causation_id=causation_id,
+            decision=decision,
+            side_effect=side_effect,
+            business_key=event_type,
+        ),
+    )
+    return result.event
 
 
 async def append_outbox_event(
+    conn,
     *,
     correlation_id: str,
     causation_id: str | None,
     event_type: str,
     payload: dict,
-    world_state_version: int | None = None,
+    session_id: str | None = None,
 ) -> OutboxEvent:
-    event = OutboxEvent(
-        id=str(uuid4()),
-        idempotency_key=f"{correlation_id}:{event_type}:{uuid4()}",
-        correlation_id=correlation_id,
-        causation_id=causation_id,
-        event_type=event_type,
-        payload=payload,
-        world_state_version=world_state_version or get_world_state().version,
-        created_at=datetime.utcnow(),
+    from core.transaction import PersistRuntimePayload, persist_runtime_tx
+
+    result = await persist_runtime_tx(
+        conn,
+        PersistRuntimePayload(
+            correlation_id=correlation_id,
+            session_id=session_id or correlation_id,
+            event_type=event_type,
+            event_payload=payload,
+            causation_id=causation_id,
+            business_key=event_type,
+        ),
     )
-    _in_memory_outbox.append(event)
-    pool = await get_pool()
-    if pool:
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    """
-                    INSERT INTO outbox_events
-                    (id, idempotency_key, correlation_id, causation_id, event_type, payload, world_state_version, processed, created_at)
-                    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,FALSE,$8)
-                    """,
-                    event.id,
-                    event.idempotency_key,
-                    event.correlation_id,
-                    event.causation_id,
-                    event.event_type,
-                    json.dumps(event.payload),
-                    event.world_state_version,
-                    event.created_at,
-                )
-    return event
+    return result.event
 
 
 async def save_decision(record: DecisionRecord) -> None:
+    """Deprecated — use persist_runtime_tx(conn, ...) inside mutative_session."""
+    from core.config import settings
+
+    if not settings.use_in_memory_store:
+        raise RuntimeError("save_decision is in-memory only; use persist_runtime_tx with conn")
     _in_memory_decisions.append(record)
-    pool = await get_pool()
-    if pool:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO decision_records (id, correlation_id, data, created_at) VALUES ($1,$2,$3::jsonb,$4)",
-                record.id,
-                record.correlation_id,
-                record.model_dump_json(),
-                record.created_at,
-            )
 
 
 async def save_side_effect(record: SideEffectRecord) -> None:
+    """Deprecated — use persist_runtime_tx(conn, ...) inside mutative_session."""
+    from core.config import settings
+
+    if not settings.use_in_memory_store:
+        raise RuntimeError("save_side_effect is in-memory only; use persist_runtime_tx with conn")
     _in_memory_effects.append(record)
-    pool = await get_pool()
-    if pool:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO side_effect_records (id, correlation_id, data, created_at) VALUES ($1,$2,$3::jsonb,$4)",
-                record.id,
-                record.correlation_id,
-                record.model_dump_json(),
-                record.created_at,
-            )
 
 
 async def fetch_unprocessed_events(limit: int = 100) -> list[OutboxEvent]:
@@ -277,13 +268,21 @@ async def mark_event_processed(idempotency_key: str) -> bool:
     return False
 
 
-async def get_events_by_correlation(correlation_id: str) -> list[OutboxEvent]:
-    memory = sorted(
-        [e for e in _in_memory_outbox if e.correlation_id == correlation_id],
-        key=lambda e: e.created_at,
-    )
-    if memory:
-        return memory
+async def get_events_by_correlation(correlation_id: str, *, conn=None) -> list[OutboxEvent]:
+    from core.config import settings
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return sorted(
+            [e for e in _in_memory_outbox if e.correlation_id == correlation_id],
+            key=lambda e: e.created_at,
+        )
+    if conn is not None:
+        rows = await conn.fetch(
+            "SELECT * FROM outbox_events WHERE correlation_id = $1 ORDER BY created_at ASC",
+            correlation_id,
+        )
+        return [_row_to_outbox(r) for r in rows]
     pool = await get_pool()
     if pool:
         async with pool.acquire() as conn:
@@ -292,16 +291,21 @@ async def get_events_by_correlation(correlation_id: str) -> list[OutboxEvent]:
                 correlation_id,
             )
             return [_row_to_outbox(r) for r in rows]
-    return sorted(
-        [e for e in _in_memory_outbox if e.correlation_id == correlation_id],
-        key=lambda e: e.created_at,
-    )
+    return []
 
 
-async def get_decisions_by_correlation(correlation_id: str) -> list[DecisionRecord]:
-    memory = [d for d in _in_memory_decisions if d.correlation_id == correlation_id]
-    if memory:
-        return memory
+async def get_decisions_by_correlation(correlation_id: str, *, conn=None) -> list[DecisionRecord]:
+    from core.config import settings
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return [d for d in _in_memory_decisions if d.correlation_id == correlation_id]
+    if conn is not None:
+        rows = await conn.fetch(
+            "SELECT data FROM decision_records WHERE correlation_id = $1 ORDER BY created_at ASC",
+            correlation_id,
+        )
+        return [DecisionRecord.model_validate_json(r["data"]) for r in rows]
     pool = await get_pool()
     if pool:
         async with pool.acquire() as conn:
@@ -310,13 +314,21 @@ async def get_decisions_by_correlation(correlation_id: str) -> list[DecisionReco
                 correlation_id,
             )
             return [DecisionRecord.model_validate_json(r["data"]) for r in rows]
-    return [d for d in _in_memory_decisions if d.correlation_id == correlation_id]
+    return []
 
 
-async def get_effects_by_correlation(correlation_id: str) -> list[SideEffectRecord]:
-    memory = [e for e in _in_memory_effects if e.correlation_id == correlation_id]
-    if memory:
-        return memory
+async def get_effects_by_correlation(correlation_id: str, *, conn=None) -> list[SideEffectRecord]:
+    from core.config import settings
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return [e for e in _in_memory_effects if e.correlation_id == correlation_id]
+    if conn is not None:
+        rows = await conn.fetch(
+            "SELECT data FROM side_effect_records WHERE correlation_id = $1 ORDER BY created_at ASC",
+            correlation_id,
+        )
+        return [SideEffectRecord.model_validate_json(r["data"]) for r in rows]
     pool = await get_pool()
     if pool:
         async with pool.acquire() as conn:
@@ -325,35 +337,46 @@ async def get_effects_by_correlation(correlation_id: str) -> list[SideEffectReco
                 correlation_id,
             )
             return [SideEffectRecord.model_validate_json(r["data"]) for r in rows]
-    return [e for e in _in_memory_effects if e.correlation_id == correlation_id]
+    return []
 
 
-async def save_replay_snapshot(session_id: str, correlation_id: str, step: int, data: dict) -> None:
-    from core.replay_store import save_replay_snapshot_memory
+async def save_replay_snapshot(
+    conn,
+    session_id: str,
+    correlation_id: str,
+    step: int,
+    data: dict,
+) -> None:
+    """Deprecated: use persist_runtime_tx(conn, ...) with replay_snapshot."""
+    from core.transaction import PersistRuntimePayload, persist_runtime_tx
 
-    save_replay_snapshot_memory(session_id, step, data)
-    pool = await get_pool()
-    if pool:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO replay_snapshots (session_id, correlation_id, step, data)
-                VALUES ($1,$2,$3,$4::jsonb)
-                ON CONFLICT (session_id, step) DO UPDATE SET data = EXCLUDED.data
-                """,
-                session_id,
-                correlation_id,
-                step,
-                json.dumps(data),
-            )
+    await persist_runtime_tx(
+        conn,
+        PersistRuntimePayload(
+            correlation_id=correlation_id,
+            session_id=session_id,
+            event_type="replay.snapshot",
+            event_payload={"step": step},
+            replay_snapshot=data,
+            replay_step=step,
+            business_key=f"replay:{step}",
+        ),
+    )
 
 
-async def get_replay_snapshots(session_id: str) -> list[dict]:
+async def get_replay_snapshots(session_id: str, *, conn=None) -> list[dict]:
+    from core.config import settings
     from core.replay_store import get_replay_snapshots_memory
+    from core.runtime_session import MemoryConnection
 
-    memory = get_replay_snapshots_memory(session_id)
-    if memory:
-        return memory
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_replay_snapshots_memory(session_id)
+    if conn is not None:
+        rows = await conn.fetch(
+            "SELECT data FROM replay_snapshots WHERE session_id = $1 ORDER BY step ASC",
+            session_id,
+        )
+        return [json.loads(r["data"]) if isinstance(r["data"], str) else r["data"] for r in rows]
     pool = await get_pool()
     if pool:
         async with pool.acquire() as conn:
@@ -394,7 +417,7 @@ async def save_agent_health(agent_id: str, data: dict) -> None:
                 """,
                 agent_id,
                 json.dumps(data),
-                datetime.utcnow(),
+                datetime.now(timezone.utc),
             )
 
 
@@ -446,8 +469,47 @@ def _row_to_outbox(row) -> OutboxEvent:
     )
 
 
+def apply_memory_runtime_persist(payload, event: OutboxEvent, world_snap: WorldStateSnapshot | None) -> None:
+    """In-memory path for tests and use_in_memory_store mode."""
+    global _world_state
+    if payload.decision:
+        _in_memory_decisions.append(payload.decision)
+    if payload.side_effect:
+        _in_memory_effects.append(payload.side_effect)
+    _in_memory_outbox.append(event)
+    if world_snap:
+        _in_memory_snapshots.append(world_snap)
+        _world_state = WorldState.model_validate(world_snap.state)
+    if payload.replay_snapshot is not None and payload.replay_step is not None:
+        from core.replay_store import save_replay_snapshot_memory
+
+        save_replay_snapshot_memory(payload.session_id, payload.replay_step, payload.replay_snapshot)
+
+
+async def get_replay_baseline(session_id: str, *, conn=None) -> str | None:
+    from core.config import settings
+    from core.replay_store import get_baseline_fingerprint_memory
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_baseline_fingerprint_memory(session_id)
+    if conn is not None:
+        row = await conn.fetchrow(
+            "SELECT outcome_fingerprint FROM replay_baselines WHERE session_id = $1",
+            session_id,
+        )
+        return row["outcome_fingerprint"] if row else None
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await get_replay_baseline(session_id, conn=c)
+    return None
+
+
 def reset_in_memory_store() -> None:
     global _world_state, _pool
+    from core.governance_store import reset_governance_memory
+
     _in_memory_outbox.clear()
     _in_memory_decisions.clear()
     _in_memory_effects.clear()
@@ -456,3 +518,4 @@ def reset_in_memory_store() -> None:
     _processed_idempotency.clear()
     _world_state = default_world_state()
     _pool = None
+    reset_governance_memory()

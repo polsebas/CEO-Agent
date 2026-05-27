@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from core.canonical import stable_hash
+from schemas.context import ContextFingerprint
 from schemas.decisions import DecisionRecord
 from schemas.runtime import ContextLayer
 from schemas.world import WorldState
@@ -14,6 +16,7 @@ class ContextBundle(BaseModel):
     task_id: str
     layers: dict[ContextLayer, str] = Field(default_factory=dict)
     estimated_tokens: int = 0
+    fingerprint: ContextFingerprint | None = None
 
 
 def _estimate_tokens(text: str) -> int:
@@ -74,10 +77,21 @@ class ContextWindowManager(BaseModel):
         if archived and ContextLayer.L5_ARCHIVED in requested and budget > 200:
             bundle.layers[ContextLayer.L5_ARCHIVED] = archived[: budget * 4]
 
-        bundle.estimated_tokens = self.max_tokens - max(0, budget)
+        used = self.max_tokens - max(0, budget)
+        bundle.estimated_tokens = used
+        sources = [layer.value for layer in bundle.layers]
+        bundle.fingerprint = ContextFingerprint(
+            context_hash=stable_hash({k.value: v for k, v in bundle.layers.items()}),
+            retrieval_sources=sources,
+            retrieval_scores={s: float(self.memory_priority_rules.get(s, 50)) for s in sources},
+            token_utilization=used / self.max_tokens if self.max_tokens else 0.0,
+            compression_ratio=used / max(_estimate_tokens(active_task + l2), 1),
+        )
         return bundle
 
     def within_budget(self, bundle: ContextBundle, memory_budget: int) -> bool:
+        if bundle.fingerprint and bundle.fingerprint.token_utilization > 1.0:
+            return False
         return bundle.estimated_tokens <= memory_budget
 
     def to_prompt(self, bundle: ContextBundle) -> str:

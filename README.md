@@ -177,6 +177,9 @@ ALLOWED_MCP_HOSTS=localhost,127.0.0.1,github-mcp.internal
 # LLM (opcional — sin key usa fallback determinístico)
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
+GOOGLE_API_KEY=
+GOOGLE_GEMINI_MODEL=gemini-3.5-flash
+LLM_PROVIDER=auto                 # prioriza Google, luego Anthropic, luego OpenAI
 
 # Persistencia
 DATABASE_URL=postgresql://ceo:ceo@localhost:5432/ceo_agent

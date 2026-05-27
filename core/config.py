@@ -1,4 +1,8 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LlmProvider = Literal["auto", "anthropic", "openai", "google"]
 
 
 class Settings(BaseSettings):
@@ -10,6 +14,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    google_api_key: str = ""
+    google_gemini_model: str = "gemini-3.5-flash"
+    llm_provider: LlmProvider = "auto"
     github_mcp_url: str = "http://localhost:8001"
     github_repo: str = "owner/repo"
     use_in_memory_store: bool = False

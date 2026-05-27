@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from schemas.approvals import ActionProposal, Approval, ApprovalStatus
 from schemas.crisis import CRISIS_OVERRIDES, CrisisType
-from schemas.world import Incident, WorldState
+from schemas.world import WorldState
 
 
 class PolicyDecision(str, Enum):
@@ -26,7 +27,6 @@ SIDE_EFFECT_LEVELS = {
 class PolicyEngine:
     def __init__(self) -> None:
         self.active_crisis: CrisisType | None = None
-        self._pending_approvals: dict[str, Approval] = {}
 
     def detect_crisis(self, world_state: WorldState) -> CrisisType | None:
         for incident in world_state.active_incidents:
@@ -51,40 +51,39 @@ class PolicyEngine:
     def evaluate(self, proposal: ActionProposal) -> PolicyDecision:
         level = SIDE_EFFECT_LEVELS.get(proposal.side_effect_level, 3)
         effective = self.effective_approval_level(level)
-        if effective == 0:
-            return PolicyDecision.ALLOW
-        if effective == 1:
+        if effective <= 1:
             return PolicyDecision.ALLOW
         if effective >= 2:
             return PolicyDecision.ESCALATE
         return PolicyDecision.DENY
 
-    def register_approval(self, approval: Approval) -> None:
-        self._pending_approvals[approval.id] = approval
+    async def get_approval(self, approval_id: str, *, conn: Any | None = None) -> Approval | None:
+        from core.governance_store import load_approval
+        from core.persistence import get_pool
+        from core.runtime_session import MemoryConnection
 
-    def get_approval(self, approval_id: str) -> Approval | None:
-        return self._pending_approvals.get(approval_id)
+        if conn is not None:
+            return await load_approval(conn, approval_id)
+        pool = await get_pool()
+        if pool:
+            async with pool.acquire() as c:
+                return await load_approval(c, approval_id)
+        from core.governance_store import _in_memory_approvals
 
-    def list_pending_approvals(self) -> list[Approval]:
-        return [a for a in self._pending_approvals.values() if a.status == ApprovalStatus.PENDING]
+        return _in_memory_approvals.get(approval_id)
 
-    def approve(self, approval_id: str, approved_by: str) -> Approval | None:
-        from datetime import datetime
+    async def list_pending_approvals(self, *, conn: Any | None = None) -> list[Approval]:
+        from core.governance_store import list_pending_approvals
 
-        approval = self._pending_approvals.get(approval_id)
+        return await list_pending_approvals(conn)
+
+    async def approve(self, conn: Any, approval_id: str, approved_by: str) -> Approval | None:
+        from core.governance_store import load_approval, update_approval_status
+
+        approval = await load_approval(conn, approval_id)
         if not approval or approval.status != ApprovalStatus.PENDING:
             return None
-        approval.status = ApprovalStatus.APPROVED
-        approval.approved_by = approved_by
-        approval.approved_at = datetime.utcnow()
-        return approval
-
-    def reject(self, approval_id: str) -> Approval | None:
-        approval = self._pending_approvals.get(approval_id)
-        if not approval:
-            return None
-        approval.status = ApprovalStatus.REJECTED
-        return approval
+        return await update_approval_status(conn, approval_id, ApprovalStatus.APPROVED, approved_by=approved_by)
 
 
 policy_engine = PolicyEngine()
