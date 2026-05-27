@@ -5,7 +5,7 @@ These rules govern all production runtime changes. PRs that violate them are rej
 - **ManualOrchestrator** is the only runtime authority.
 - **Agno** never mutates state (world, runtime, side effects, approvals). It is an interchangeable cognition adapter.
 - **All mutations** require policy evaluation. There is no `skip_policy` bypass.
-- **All mutative requests** require `pg_advisory_xact_lock(hashtext(session_id))` inside a Postgres transaction.
+- **All mutative requests** require `pg_try_advisory_xact_lock(hashtext(session_id))` inside a Postgres transaction (fail fast on contention).
 - **Replay snapshots** are transactionally persisted in the same TX as decision/outbox/world updates.
 - **Postgres** is the only source of truth in production (no dual-write to in-memory lists).
 - **Runtime determinism** is measured through `CanonicalReplayOutcome` fingerprints via `canonical_json` / `stable_hash`.

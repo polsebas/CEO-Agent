@@ -24,13 +24,18 @@ class SessionLockError(Exception):
 
 
 async def acquire_session_lock(conn: Any, session_id: str) -> None:
-    """Acquire advisory lock on the same connection used for persistence."""
+    """Acquire advisory lock on the same connection used for persistence (non-blocking)."""
     if isinstance(conn, MemoryConnection):
         if session_id in _memory_session_locks:
             raise SessionLockError(f"Session {session_id} already locked")
         _memory_session_locks.add(session_id)
         return
-    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", session_id)
+    acquired = await conn.fetchval(
+        "SELECT pg_try_advisory_xact_lock(hashtext($1))",
+        session_id,
+    )
+    if not acquired:
+        raise SessionLockError(f"Session {session_id} already locked")
 
 
 def release_memory_session_lock(session_id: str) -> None:

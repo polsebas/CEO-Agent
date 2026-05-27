@@ -33,7 +33,7 @@ See [runtime_invariants.md](./runtime_invariants.md).
 
 | Milestone | Estado |
 |-----------|--------|
-| RRM1-R1 | Un solo `mutative_session` + `pg_advisory_xact_lock` en la misma conexión |
+| RRM1-R1 | Un solo `mutative_session` + `pg_try_advisory_xact_lock` en la misma conexión |
 | RRM1-R2 | Approvals + audit en Postgres (`governance_store`) |
 | RRM1-R3 | Frozen replay re-orquesta y compara baseline persistido |
 | RRM1-R4 | Outbox: `SKIP LOCKED`, processed solo tras handler OK |
