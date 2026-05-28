@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from api.auth import AuthContext
+from api.adaptive import router as adaptive_router
 from api.diagnostics import router as diagnostics_router
 from core.approval_service import (
     create_immutable_proposal,
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CEO-Agent Cognitive OS", version="0.5.0", lifespan=lifespan)
 app.include_router(diagnostics_router)
+app.include_router(adaptive_router)
 
 
 @app.get("/metrics")

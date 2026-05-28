@@ -21,9 +21,15 @@ from schemas.decisions import DecisionRecord
 from schemas.diagnostics import SessionDiagnostics
 from schemas.effects import SideEffectRecord
 from schemas.runtime import OutboxEvent
+from schemas.adaptive import AdaptivePolicySnapshot
+from schemas.context import ContextPriorityScore
+from schemas.governance_runtime import AdaptiveGovernanceEvent
 from schemas.runtime_health import RuntimeAnomaly, RuntimeHealth
 from schemas.spans import ExecutionSpan
+from schemas.tools import ToolReliabilityProfile
 from schemas.world import WorldStateSnapshot
+
+from core.session_stability import SessionStabilityEvent
 
 
 @dataclass
@@ -59,6 +65,11 @@ class PersistRuntimePayload:
     session_diagnostics: SessionDiagnostics | None = None
     drain_spans: bool = True
     tool_failure_rate: float = 0.0
+    adaptive_policy_snapshot: AdaptivePolicySnapshot | None = None
+    tool_reliability_updates: list[ToolReliabilityProfile] = field(default_factory=list)
+    context_priority_scores: list[ContextPriorityScore] = field(default_factory=list)
+    stability_events: list[SessionStabilityEvent] = field(default_factory=list)
+    governance_events: list[AdaptiveGovernanceEvent] = field(default_factory=list)
 
 
 @dataclass
@@ -105,18 +116,25 @@ def _has_intelligence_data(payload: PersistRuntimePayload) -> bool:
         or payload.prompt_lineage
         or payload.runtime_anomalies
         or payload.session_diagnostics
+        or payload.adaptive_policy_snapshot
+        or payload.tool_reliability_updates
+        or payload.context_priority_scores
+        or payload.stability_events
+        or payload.governance_events
     )
 
 
 async def _persist_intelligence(conn: Any, payload: PersistRuntimePayload) -> None:
     if not _has_intelligence_data(payload):
         return
+    from core.adaptive_persist import persist_adaptive
     from core.intelligence_persist import apply_intelligence_memory, persist_intelligence_postgres
 
     if isinstance(conn, MemoryConnection):
         apply_intelligence_memory(payload)
     else:
         await persist_intelligence_postgres(conn, payload)
+    await persist_adaptive(conn, payload)
 
 
 async def _build_session_diagnostics_only(conn: Any, payload: PersistRuntimePayload) -> None:

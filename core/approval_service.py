@@ -82,7 +82,10 @@ async def prepare_approval(conn: Any, proposal: ImmutableActionProposal, request
         side_effect_level=proposal.side_effect_level,
         impact_summary=proposal.impact_summary,
     )
-    decision = policy_engine.evaluate(action_proposal)
+    decision = policy_engine.evaluate(
+        action_proposal,
+        session_id=proposal.correlation_id,
+    )
     if decision == PolicyDecision.DENY:
         raise ValueError("Policy denied action")
     approval_id = str(uuid4())
@@ -162,7 +165,10 @@ async def execute_approved_action(conn: Any, approval: Approval, approved_by: st
         side_effect_level=frozen.side_effect_level,
         impact_summary=frozen.impact_summary,
     )
-    decision = policy_engine.evaluate(action_proposal)
+    decision = policy_engine.evaluate(
+        action_proposal,
+        session_id=approval.correlation_id,
+    )
     if decision not in (PolicyDecision.ALLOW, PolicyDecision.ESCALATE):
         raise ValueError(f"Policy re-validation failed: {decision.value}")
 

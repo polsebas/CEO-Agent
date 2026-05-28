@@ -41,16 +41,28 @@ class PolicyEngine:
         self.active_crisis = crisis
         return crisis
 
-    def effective_approval_level(self, base_level: int) -> int:
+    def effective_approval_level(self, base_level: int, *, adaptive_bias: float = 0.0) -> int:
+        """RRM-3: adaptive_bias may only escalate (non-negative)."""
+        bias = max(0.0, adaptive_bias)
         if not self.active_crisis:
-            return base_level
+            return base_level + int(bias)
         override = CRISIS_OVERRIDES[self.active_crisis]
-        adjusted = base_level + override.approval_level_delta
+        adjusted = base_level + override.approval_level_delta + int(bias)
         return max(0, min(override.max_bypass_level, adjusted))
 
-    def evaluate(self, proposal: ActionProposal) -> PolicyDecision:
+    def evaluate(
+        self,
+        proposal: ActionProposal,
+        *,
+        session_id: str | None = None,
+        extra_approval_bias: float = 0.0,
+    ) -> PolicyDecision:
+        from core.adaptive_context import get_session_approval_bias
+
         level = SIDE_EFFECT_LEVELS.get(proposal.side_effect_level, 3)
-        effective = self.effective_approval_level(level)
+        sid = session_id or proposal.task_id
+        bias = get_session_approval_bias(sid) + max(0.0, extra_approval_bias)
+        effective = self.effective_approval_level(level, adaptive_bias=bias)
         if effective <= 1:
             return PolicyDecision.ALLOW
         if effective >= 2:

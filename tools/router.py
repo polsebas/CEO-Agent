@@ -56,6 +56,7 @@ async def execute_tool(
     params: dict | None = None,
     *,
     session_id: str | None = None,
+    extra_approval_bias: float = 0.0,
 ) -> ToolResult:
     from core.spans import span_manager
     from schemas.spans import SpanStatus, SpanType
@@ -95,7 +96,11 @@ async def execute_tool(
             side_effect_level="EXECUTE_SAFE" if cap.side_effect_level == 2 else "EXECUTE_CRITICAL",
             impact_summary=f"Execute {tool_name} with params {params}",
         )
-        decision = policy_engine.evaluate(proposal)
+        decision = policy_engine.evaluate(
+            proposal,
+            session_id=session_id or correlation_id,
+            extra_approval_bias=extra_approval_bias,
+        )
         if decision == PolicyDecision.ESCALATE:
             span_manager.end(tspan, status=SpanStatus.OK)
             return ToolResult(

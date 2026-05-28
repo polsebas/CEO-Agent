@@ -213,6 +213,51 @@ async def init_schema(pool) -> None:
                 data JSONB NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS adaptive_policies (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                signals_hash TEXT NOT NULL,
+                policy_hash TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_adaptive_policy_session ON adaptive_policies(session_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS tool_reliability_profiles (
+                tool_name TEXT PRIMARY KEY,
+                data JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_tool_reliability_updated ON tool_reliability_profiles(updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS context_priority_snapshots (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_context_priority_session ON context_priority_snapshots(session_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS session_stability_events (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_stability_session ON session_stability_events(session_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS adaptive_governance_events (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                correlation_id TEXT NOT NULL,
+                data JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_governance_session ON adaptive_governance_events(session_id, created_at DESC);
             """
         )
 
@@ -567,6 +612,9 @@ def apply_memory_runtime_persist(payload, event: OutboxEvent, world_snap: WorldS
 
         append_retry_trace(payload.retry_trace.model_dump(mode="json"))
     apply_intelligence_memory(payload)
+    from core.adaptive_persist import apply_adaptive_memory
+
+    apply_adaptive_memory(payload)
 
 
 async def get_runtime_transitions(session_id: str, *, conn=None) -> list:
@@ -716,6 +764,135 @@ async def query_runtime_health(session_id: str, *, conn=None) -> list:
     return []
 
 
+async def query_adaptive_policy(session_id: str, *, conn=None):
+    from core.config import settings
+    from core.intelligence_store import get_adaptive_policies
+    from core.runtime_session import MemoryConnection
+    from schemas.adaptive import AdaptivePolicySnapshot
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        rows = get_adaptive_policies(session_id)
+        return rows[-1] if rows else None
+    if conn is not None:
+        row = await conn.fetchrow(
+            """
+            SELECT data FROM adaptive_policies
+            WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1
+            """,
+            session_id,
+        )
+        if not row:
+            return None
+        return AdaptivePolicySnapshot.model_validate(_json_data(row["data"]))
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_adaptive_policy(session_id, conn=c)
+    return None
+
+
+async def query_tool_reliability_profiles(*, conn=None) -> list:
+    from core.config import settings
+    from core.intelligence_store import get_tool_profiles
+    from core.runtime_session import MemoryConnection
+    from schemas.tools import ToolReliabilityProfile
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_tool_profiles()
+    if conn is not None:
+        rows = await conn.fetch(
+            "SELECT data FROM tool_reliability_profiles ORDER BY updated_at DESC"
+        )
+        return [ToolReliabilityProfile.model_validate(_json_data(r["data"])) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_tool_reliability_profiles(conn=c)
+    return []
+
+
+async def query_stability_events(session_id: str, *, conn=None) -> list:
+    from core.config import settings
+    from core.intelligence_store import get_stability_events
+    from core.runtime_session import MemoryConnection
+    from core.session_stability import SessionStabilityEvent
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_stability_events(session_id)
+    if conn is not None:
+        rows = await conn.fetch(
+            """
+            SELECT data FROM session_stability_events
+            WHERE session_id = $1 ORDER BY created_at ASC
+            """,
+            session_id,
+        )
+        return [SessionStabilityEvent.model_validate(_json_data(r["data"])) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_stability_events(session_id, conn=c)
+    return []
+
+
+async def query_governance_events(session_id: str, *, conn=None) -> list:
+    from core.config import settings
+    from core.intelligence_store import get_governance_events
+    from core.runtime_session import MemoryConnection
+    from schemas.governance_runtime import AdaptiveGovernanceEvent
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        return get_governance_events(session_id)
+    if conn is not None:
+        rows = await conn.fetch(
+            """
+            SELECT data FROM adaptive_governance_events
+            WHERE session_id = $1 ORDER BY created_at ASC
+            """,
+            session_id,
+        )
+        return [AdaptiveGovernanceEvent.model_validate(_json_data(r["data"])) for r in rows]
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_governance_events(session_id, conn=c)
+    return []
+
+
+async def query_context_intelligence(session_id: str, *, conn=None) -> dict:
+    from core.config import settings
+    from core.intelligence_store import get_context_priority_snapshots
+    from core.runtime_session import MemoryConnection
+
+    if settings.use_in_memory_store or isinstance(conn, MemoryConnection):
+        snaps = get_context_priority_snapshots(session_id)
+        policy = await query_adaptive_policy(session_id, conn=conn)
+        return {
+            "session_id": session_id,
+            "priority_snapshots": snaps,
+            "context_budget_ratio": policy.policy.context_budget_ratio if policy else 1.0,
+        }
+    if conn is not None:
+        rows = await conn.fetch(
+            """
+            SELECT data, correlation_id, created_at FROM context_priority_snapshots
+            WHERE session_id = $1 ORDER BY created_at DESC LIMIT 5
+            """,
+            session_id,
+        )
+        policy = await query_adaptive_policy(session_id, conn=conn)
+        return {
+            "session_id": session_id,
+            "priority_snapshots": [_json_data(r["data"]) for r in rows],
+            "context_budget_ratio": policy.policy.context_budget_ratio if policy else 1.0,
+        }
+    pool = await get_pool()
+    if pool:
+        async with pool.acquire() as c:
+            return await query_context_intelligence(session_id, conn=c)
+    return {"session_id": session_id, "priority_snapshots": [], "context_budget_ratio": 1.0}
+
+
 async def query_session_diagnostics_row(session_id: str, *, conn=None):
     from core.config import settings
     from core.intelligence_store import get_session_diagnostics
@@ -779,6 +956,9 @@ def reset_in_memory_store() -> None:
     from core.intelligence_store import reset_intelligence_store
     from core.prompt_lineage import prompt_lineage_tracker
 
+    from core.adaptive_context import reset_adaptive_context
+
+    reset_adaptive_context()
     reset_intelligence_store()
     prompt_lineage_tracker._last_hash.clear()
     _in_memory_outbox.clear()

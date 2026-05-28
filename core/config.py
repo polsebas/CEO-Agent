@@ -27,6 +27,19 @@ class Settings(BaseSettings):
     degraded_success_threshold: float = 0.7
     runtime_health_enforcement: bool = True
 
+    # RRM-3 adaptive thresholds
+    adaptive_retry_density_high: float = 0.6
+    adaptive_context_pressure_high: float = 0.85
+    adaptive_replay_confidence_low: float = 0.5
+    adaptive_drift_severity_high: float = 0.5
+    adaptive_latency_pressure_high: float = 0.7
+    adaptive_session_age_long_seconds: int = 3600
+    adaptive_tool_enter_degraded: float = 0.70
+    adaptive_tool_exit_degraded: float = 0.82
+    adaptive_approval_bias_max: float = 2.0
+    adaptive_context_budget_min: float = 0.25
+    adaptive_context_budget_relaxed_max: float = 1.0
+
     otel_service_name: str = "ceo-agent"
     otel_exporter_otlp_endpoint: str = ""
     otel_sdk_disabled: bool = False

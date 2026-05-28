@@ -35,6 +35,7 @@ markers = [
     "rrm15: RRM-1.5 Replay Integrity gate (SPEC-RRM1.5)",
     "rrm2: RRM-2 Runtime Intelligence gate (SPEC-RRM2)",
     "rrm21: RRM-2.1 Intelligence Reliability Hardening gate",
+    "rrm3: RRM-3 Adaptive Cognition Runtime gate",
     "postgres: requires DATABASE_URL and Postgres (skipped locally if unavailable)",
 ]
 

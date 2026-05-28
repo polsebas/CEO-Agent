@@ -58,6 +58,16 @@ async def build_session_diagnostics(
     snaps = await get_replay_snapshots(session_id, conn=conn)
     baseline = await get_replay_baseline_meta(session_id, conn=conn)
 
+    from core.persistence import (
+        query_adaptive_policy,
+        query_governance_events,
+        query_stability_events,
+    )
+
+    adaptive_snap = await query_adaptive_policy(session_id, conn=conn)
+    stability_events = await query_stability_events(session_id, conn=conn)
+    governance_events = await query_governance_events(session_id, conn=conn)
+
     span_by_type: dict[str, int] = {}
     for s in spans:
         span_by_type[s.span_type.value] = span_by_type.get(s.span_type.value, 0) + 1
@@ -97,4 +107,15 @@ async def build_session_diagnostics(
             ],
         },
         anomaly_events=anomalies,
+        adaptive_policy_summary=(
+            adaptive_snap.policy.model_dump() if adaptive_snap else {}
+        ),
+        stability_summary={
+            "event_count": len(stability_events),
+            "events": [e.model_dump() for e in stability_events[-5:]],
+        },
+        governance_summary={
+            "event_count": len(governance_events),
+            "events": [e.model_dump() for e in governance_events[-5:]],
+        },
     )

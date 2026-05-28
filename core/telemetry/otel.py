@@ -21,6 +21,12 @@ _cognitive_tokens = None
 _reasoning_latency = None
 _retry_count = None
 _runtime_health_score = None
+_adaptive_policy_changes = None
+_tool_confidence = None
+_context_budget_ratio = None
+_retry_storm_events = None
+_delegation_disable_events = None
+_session_stability_score = None
 
 
 def trace_id_from_correlation(correlation_id: str) -> str:
@@ -30,6 +36,8 @@ def trace_id_from_correlation(correlation_id: str) -> str:
 def init_telemetry() -> None:
     global _initialized, _tracer, _meter, _prometheus_reader
     global _cognitive_tokens, _reasoning_latency, _retry_count, _runtime_health_score
+    global _adaptive_policy_changes, _tool_confidence, _context_budget_ratio
+    global _retry_storm_events, _delegation_disable_events, _session_stability_score
 
     if _initialized:
         return
@@ -87,6 +95,30 @@ def init_telemetry() -> None:
         "runtime_health_score",
         description="Composite runtime health score",
     )
+    _adaptive_policy_changes = _meter.create_counter(
+        "adaptive_policy_changes_total",
+        description="Adaptive policy materializations",
+    )
+    _tool_confidence = _meter.create_up_down_counter(
+        "tool_confidence_score",
+        description="Tool routing confidence",
+    )
+    _context_budget_ratio = _meter.create_up_down_counter(
+        "context_budget_ratio",
+        description="Active context budget ratio",
+    )
+    _retry_storm_events = _meter.create_counter(
+        "retry_storm_events_total",
+        description="Retry storm detections",
+    )
+    _delegation_disable_events = _meter.create_counter(
+        "delegation_disable_events_total",
+        description="Delegation disable events",
+    )
+    _session_stability_score = _meter.create_histogram(
+        "session_stability_score",
+        description="Session stability score",
+    )
 
     _initialized = True
 
@@ -94,6 +126,8 @@ def init_telemetry() -> None:
 def shutdown_telemetry() -> None:
     global _initialized, _tracer, _meter, _prometheus_reader
     global _cognitive_tokens, _reasoning_latency, _retry_count, _runtime_health_score
+    global _adaptive_policy_changes, _tool_confidence, _context_budget_ratio
+    global _retry_storm_events, _delegation_disable_events, _session_stability_score
     if not _initialized:
         return
     try:
@@ -126,6 +160,12 @@ def shutdown_telemetry() -> None:
     _reasoning_latency = None
     _retry_count = None
     _runtime_health_score = None
+    _adaptive_policy_changes = None
+    _tool_confidence = None
+    _context_budget_ratio = None
+    _retry_storm_events = None
+    _delegation_disable_events = None
+    _session_stability_score = None
 
 
 def get_tracer():
@@ -168,6 +208,42 @@ def record_health_score(score: float, session_id: str) -> None:
     init_telemetry()
     if _runtime_health_score is not None:
         _runtime_health_score.add(int(score * 100), {"session_id": session_id})
+
+
+def record_adaptive_policy_change(session_id: str) -> None:
+    init_telemetry()
+    if _adaptive_policy_changes is not None:
+        _adaptive_policy_changes.add(1, {"session_id": session_id})
+
+
+def record_context_budget_ratio(ratio: float, session_id: str) -> None:
+    init_telemetry()
+    if _context_budget_ratio is not None:
+        _context_budget_ratio.add(int(ratio * 100), {"session_id": session_id})
+
+
+def record_tool_confidence(tool_name: str, score: float) -> None:
+    init_telemetry()
+    if _tool_confidence is not None:
+        _tool_confidence.add(int(score * 100), {"tool_name": tool_name})
+
+
+def record_retry_storm(session_id: str) -> None:
+    init_telemetry()
+    if _retry_storm_events is not None:
+        _retry_storm_events.add(1, {"session_id": session_id})
+
+
+def record_delegation_disable(session_id: str) -> None:
+    init_telemetry()
+    if _delegation_disable_events is not None:
+        _delegation_disable_events.add(1, {"session_id": session_id})
+
+
+def record_session_stability_score(score: float, session_id: str) -> None:
+    init_telemetry()
+    if _session_stability_score is not None:
+        _session_stability_score.record(score, {"session_id": session_id})
 
 
 def start_otel_span(name: str, *, trace_id: str, attributes: dict | None = None):

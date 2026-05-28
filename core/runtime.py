@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from schemas.adaptive import AdaptivePolicy
 from schemas.runtime import VALID_TRANSITIONS, RuntimeState
 
 
@@ -24,6 +25,11 @@ class RuntimeStateMachine:
     history: list[tuple[RuntimeState, datetime]] = field(default_factory=list)
     stuck_counter: int = 0
     max_stuck_iterations: int = 5
+    adaptive_policy: AdaptivePolicy | None = None
+    policy_recompute_required: bool = False
+    _session_tool_names: list[str] = field(default_factory=list)
+    _session_delegations: list[str] = field(default_factory=list)
+    _stability_event_keys: set[str] = field(default_factory=set)
 
     def transition(self, target: RuntimeState) -> RuntimeState:
         allowed = VALID_TRANSITIONS.get(self.state, set())

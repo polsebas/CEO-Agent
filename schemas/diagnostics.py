@@ -18,6 +18,9 @@ class SessionDiagnostics(BaseModel):
     replay_summary: dict[str, Any] = Field(default_factory=dict)
     context_summary: dict[str, Any] = Field(default_factory=dict)
     anomaly_events: list[RuntimeAnomaly] = Field(default_factory=list)
+    adaptive_policy_summary: dict[str, Any] = Field(default_factory=dict)
+    stability_summary: dict[str, Any] = Field(default_factory=dict)
+    governance_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReplayAnalytics(BaseModel):

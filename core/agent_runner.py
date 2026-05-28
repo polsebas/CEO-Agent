@@ -34,7 +34,7 @@ class StructuredAgentRunner:
     ) -> tuple[T, StructuredRetryTrace, CognitiveTelemetry]:
         budget = budget or CognitiveBudget()
         if settings.runtime_health_enforcement and getattr(budget, "force_deterministic", False):
-            budget = CognitiveBudget(max_retries=0, reasoning_budget=budget.reasoning_budget)
+            budget = budget.model_copy(update={"max_retries": 0, "force_deterministic": True})
 
         reset_retry_counter(correlation_id)
         span = span_manager.start(
