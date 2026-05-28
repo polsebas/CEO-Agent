@@ -470,6 +470,24 @@ Every coding agent operating on this repository MUST:
 
 ---
 
+## Pre-commit CI gate (mandatory)
+
+**Do not create a git commit** until local CI passes. This mirrors `.github/workflows/rrm1-gate.yml`.
+
+```bash
+pip install -e ".[dev]"
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
+```
+
+* `pytest tests/ -q` is **not** a substitute — use `scripts/ci-local.sh` (exact CI test paths).
+* While debugging, a narrow pytest path is allowed; **before commit**, run the full script.
+* Changes to persistence, replay, outbox, or `tests/integration/test_postgres_*` require the postgres job: `DATABASE_URL=postgresql://ceo:ceo@localhost:5432/ceo_agent USE_IN_MEMORY_STORE=false` (see `AGENTS.md`).
+* On failure: fix, re-run until exit 0; never commit with a red gate.
+
+See also: [AGENTS.md](../../AGENTS.md), `.cursor/rules/ci-pre-commit.mdc`.
+
+---
+
 ## Before Any Architectural Change
 
 The agent MUST ask:

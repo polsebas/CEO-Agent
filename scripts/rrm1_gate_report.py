@@ -7,9 +7,22 @@ import subprocess
 import sys
 
 
+# Kept for ad-hoc reports; canonical pre-commit gate is scripts/ci-local.sh (see AGENTS.md).
 CRITERIA = [
-    ("unit + governance", ["pytest", "tests/unit", "tests/governance", "tests/experimental", "-q"]),
-    ("vertical slice", ["pytest", "tests/vertical_slice", "-q"]),
+    (
+        "unit-and-gate (CI mirror)",
+        [
+            "pytest",
+            "tests/unit",
+            "tests/governance",
+            "tests/experimental",
+            "tests/gate",
+            "tests/vertical_slice",
+            "tests/integration/test_session_contention.py",
+            "-q",
+            "--tb=short",
+        ],
+    ),
 ]
 
 

@@ -1,0 +1,47 @@
+---
+description: Mandatory CI test gate before commits — mirror GitHub RRM1 Gate workflow
+alwaysApply: true
+---
+
+# CI pre-commit gate (mandatory)
+
+**Never create a git commit** (and never tell the user a change is "ready") until local CI passes.
+
+## Required command
+
+From repo root, after `pip install -e ".[dev]"`:
+
+```bash
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
+```
+
+This mirrors `.github/workflows/rrm1-gate.yml` job `unit-and-gate` exactly.
+
+`pytest tests/ -q` alone is **not** sufficient — it hides CI scope and skips Postgres when `DATABASE_URL` is unset.
+
+## Postgres job (required when touching persistence)
+
+If you changed any of: `core/persistence.py`, `core/storage.py`, `core/replay_*`, `core/outbox*`, `workers/`, `tests/integration/test_postgres_*`, or SQL/migration behavior:
+
+```bash
+docker compose up -d db
+export DATABASE_URL=postgresql://ceo:ceo@localhost:5432/ceo_agent
+export USE_IN_MEMORY_STORE=false
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
+```
+
+Do **not** set `CI_LOCAL_SKIP_POSTGRES=1` for those changes.
+
+## While iterating
+
+You may run a **narrow** pytest path only while debugging one failure. Before commit you **must** run the full `./scripts/ci-local.sh` with no skips.
+
+## On failure
+
+1. Fix the code — do not commit with failing or skipped gate tests.
+2. Re-run `./scripts/ci-local.sh` until exit code 0.
+3. In your summary, state that CI-local passed (include last pytest summary line).
+
+## Architectural changes
+
+Changes under `core/`, `tests/gate/`, or `tests/integration/` also require `.agents/skills/runtime-reliability-architecture/SKILL.md` and `docs/runtime_invariants.md`.

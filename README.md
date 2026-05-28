@@ -411,19 +411,31 @@ El router (`tools/router.py`) normaliza todas las invocaciones a `ToolResult` y 
 
 ## Tests
 
+**Antes de cada commit/PR** (mismo alcance que CI en `.github/workflows/rrm1-gate.yml`):
+
 ```bash
-.venv/bin/pytest tests/ -v
+pip install -e ".[dev]"
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
 ```
+
+Con Postgres local (`docker compose up -d db`):
+
+```bash
+export DATABASE_URL=postgresql://ceo:ceo@localhost:5432/ceo_agent
+export USE_IN_MEMORY_STORE=false
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
+```
+
+Ver también `AGENTS.md` para reglas de agentes.
 
 | Suite | Qué valida |
 |-------|------------|
 | `tests/unit/` | Runtime, context, preprocessor, structured retry |
-| `tests/vertical_slice/test_gate.py` | Gate VS: orchestration, replay, timeline, approvals, concurrency |
-| `tests/vertical_slice/test_governance_hardening.py` | Auth 401, RBAC 403, expiry, checksum tamper, transiciones |
+| `tests/gate/` | Replay, outbox, RRM milestones |
+| `tests/vertical_slice/` | Gate VS + governance E2E |
+| `tests/integration/test_postgres_*` | Postgres (job CI `postgres-integration`) |
 
-Tests usan `USE_IN_MEMORY_STORE=true` y `AUTH_DISABLED=true` via `conftest.py`.
-
-**Estado actual:** 30 tests passing.
+Tests en memoria usan `USE_IN_MEMORY_STORE=true` y `AUTH_DISABLED=true` via `conftest.py`.
 
 ---
 
@@ -466,10 +478,10 @@ El VS se considera production-grade cuando:
 
 ### Lint / typecheck
 
-El proyecto usa `pytest` como gate principal. Correr tests antes de cada PR:
+El proyecto usa `pytest` como gate principal. Correr **siempre** antes de cada PR:
 
 ```bash
-.venv/bin/pytest tests/ -q --cache-clear
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
 ```
 
 ---
