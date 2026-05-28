@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Adaptive — {{ session_id }}{% endblock %}
+{% block content %}
+{% include "partials/session_nav.html" %}
+<h1 class="text-xl font-bold mb-4">Adaptive cognition</h1>
+
+<div class="stat-card mb-4 inline-block">
+  <div class="stat-title">Stability score</div>
+  <div class="stat-value">{{ adaptive.stability_score }}</div>
+</div>
+
+{% if adaptive.policy %}
+<div class="card mb-4">
+  <div class="card-body">
+    <h2 class="font-semibold">Current policy</h2>
+    <ul class="text-sm space-y-1 mt-2">
+      {% set pol = adaptive.policy.policy %}
+      <li>max_retry_depth: <strong>{{ pol.max_retry_depth }}</strong></li>
+      <li>delegation_enabled: <strong>{{ pol.delegation_enabled }}</strong></li>
+      <li>context_budget_ratio: <strong>{{ pol.context_budget_ratio }}</strong></li>
+      <li>deterministic_mode: <strong>{{ pol.deterministic_mode }}</strong></li>
+    </ul>
+  </div>
+</div>
+{% else %}
+<p class="opacity-60">Sin adaptive policy snapshot.</p>
+{% endif %}
+
+<h2 class="font-semibold mb-2">Stability events</h2>
+<ul class="space-y-2">
+  {% for e in adaptive.stability_events %}
+  <li class="card p-3 text-sm">
+    <span class="badge badge-warning">{{ e.event_type }}</span>
+    severity {{ e.severity }}
+  </li>
+  {% else %}
+  <li class="opacity-60">Sin eventos.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

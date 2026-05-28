@@ -1,0 +1,35 @@
+<table class="table table-zebra w-full">
+  <thead>
+    <tr>
+      <th>Session</th>
+      <th>Health</th>
+      <th>Replay</th>
+      <th>Pending</th>
+      <th>Updated</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sessions %}
+    <tr>
+      <td>
+        <a class="link font-mono" href="/sessions/{{ s.session_id }}?correlation_id={{ s.correlation_id }}">
+          {{ s.session_id }}
+        </a>
+        {% if s.founder_request %}
+        <div class="text-xs opacity-60 truncate max-w-xs">{{ s.founder_request[:80] }}</div>
+        {% endif %}
+      </td>
+      <td>
+        <span class="badge {% if s.degraded %}badge-error{% else %}badge-success{% endif %}">
+          {{ s.health_status }}
+        </span>
+      </td>
+      <td>{{ "%.0f"|format(s.replay_confidence * 100) }}%</td>
+      <td>{{ s.pending_approvals }}</td>
+      <td class="text-xs">{{ s.updated_at.isoformat()[:19] if s.updated_at else '—' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="opacity-60">No hay sesiones. Ejecutá un founder request.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

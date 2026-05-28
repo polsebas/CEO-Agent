@@ -1,0 +1,8 @@
+{
+  "demo_id": "incident_response",
+  "title": "Replay divergence",
+  "description": "Demuestra runtime intelligence y replay analytics",
+  "session_id": "demo-incident-response",
+  "correlation_id": "demo-incident-response-corr",
+  "message": "Analyze incident response timeline and replay divergence for outage RCA"
+}

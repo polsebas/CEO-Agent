@@ -105,6 +105,10 @@ def get_session_diagnostics(session_id: str) -> SessionDiagnostics | None:
     return _in_memory_session_diagnostics.get(session_id)
 
 
+def list_all_session_diagnostics() -> list[SessionDiagnostics]:
+    return list(_in_memory_session_diagnostics.values())
+
+
 def append_adaptive_policy(snapshot: AdaptivePolicySnapshot) -> None:
     _in_memory_adaptive_policies.append(snapshot)
 

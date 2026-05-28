@@ -1,0 +1,18 @@
+<ul class="timeline timeline-vertical">
+  {% for event in timeline %}
+  <li class="timeline-item">
+    <div class="timeline-start text-xs opacity-60 font-mono">{{ event.timestamp.isoformat()[:19] }}</div>
+    <div class="timeline-middle">
+      <span class="badge badge-sm {% if event.severity in ('critical', 'high') %}badge-error{% elif event.severity in ('warning', 'medium') %}badge-warning{% else %}badge-ghost{% endif %}">
+        {{ event.event_type }}
+      </span>
+    </div>
+    <div class="timeline-end timeline-box">
+      <div class="font-medium">{{ event.headline }}</div>
+      {% if event.detail %}<div class="text-sm opacity-70">{{ event.detail }}</div>{% endif %}
+    </div>
+  </li>
+  {% else %}
+  <li class="opacity-60">Sin eventos en timeline.</li>
+  {% endfor %}
+</ul>

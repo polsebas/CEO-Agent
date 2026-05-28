@@ -1,0 +1,8 @@
+{
+  "demo_id": "deployment_review",
+  "title": "Approval flow",
+  "description": "Demuestra governance human-in-the-loop con operator + reviewer",
+  "session_id": "demo-deployment-review",
+  "correlation_id": "demo-deployment-review-corr",
+  "message": "Prepare deployment review for production release candidate v2.4"
+}

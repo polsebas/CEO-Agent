@@ -1,0 +1,12 @@
+{
+  "name": "ceo-agent-ui",
+  "private": true,
+  "scripts": {
+    "dev:css": "tailwindcss -i ./ui/static/css/input.css -o ./ui/static/css/app.css --watch",
+    "build:css": "tailwindcss -i ./ui/static/css/input.css -o ./ui/static/css/app.css --minify"
+  },
+  "devDependencies": {
+    "daisyui": "^4.12.14",
+    "tailwindcss": "^3.4.17"
+  }
+}

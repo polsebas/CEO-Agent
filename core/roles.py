@@ -6,6 +6,7 @@ from enum import Enum
 class UserRole(str, Enum):
     FOUNDER = "founder"
     ADMIN = "admin"
+    REVIEWER = "reviewer"
     OPERATOR = "operator"
     READONLY = "readonly"
 
@@ -13,6 +14,7 @@ class UserRole(str, Enum):
 ROLE_HIERARCHY = {
     UserRole.READONLY: 0,
     UserRole.OPERATOR: 1,
-    UserRole.ADMIN: 2,
-    UserRole.FOUNDER: 3,
+    UserRole.REVIEWER: 2,
+    UserRole.ADMIN: 3,
+    UserRole.FOUNDER: 4,
 }

@@ -1,0 +1,8 @@
+{
+  "demo_id": "degraded_session",
+  "title": "Retry storm / adaptive cognition",
+  "description": "Demuestra degraded mode y adaptive policy bajo presión de retries",
+  "session_id": "demo-degraded-session",
+  "correlation_id": "demo-degraded-session-corr",
+  "message": "Investigate retry storm during incident response workflow"
+}

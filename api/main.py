@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from api.auth import AuthContext
 from api.adaptive import router as adaptive_router
 from api.diagnostics import router as diagnostics_router
+from api.sessions import router as sessions_router
 from core.approval_service import (
     create_immutable_proposal,
     execute_approved_action_in_session,
@@ -46,6 +49,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="CEO-Agent Cognitive OS", version="0.5.0", lifespan=lifespan)
 app.include_router(diagnostics_router)
 app.include_router(adaptive_router)
+app.include_router(sessions_router)
+
+from ui.routes import router as ui_router
+
+_UI_STATIC = Path(__file__).resolve().parent.parent / "ui" / "static"
+app.mount("/static", StaticFiles(directory=str(_UI_STATIC)), name="static")
+app.include_router(ui_router)
 
 
 @app.get("/metrics")

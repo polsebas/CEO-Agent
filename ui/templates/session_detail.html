@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ session_id }} — CEO-Agent Ops{% endblock %}
+{% block content %}
+<div class="flex flex-col lg:flex-row gap-6">
+  <aside class="lg:w-72 shrink-0">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="font-mono text-sm break-all">{{ session_id }}</h1>
+        <p class="text-xs opacity-60">corr: {{ correlation_id }}</p>
+        <div class="flex flex-wrap gap-1 mt-2">
+          <span class="badge {% if detail.summary.degraded %}badge-error{% else %}badge-success{% endif %}">
+            {{ detail.summary.health_status }}
+          </span>
+          <span class="badge badge-ghost">replay {{ "%.0f"|format(detail.summary.replay_confidence * 100) }}%</span>
+        </div>
+        {% if can_export %}
+        <a class="btn btn-outline btn-sm mt-3" href="/sessions/{{ session_id }}/export?correlation_id={{ correlation_id }}">
+          Export bundle
+        </a>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card mt-4">
+      <div class="card-body">
+        <h2 class="font-semibold text-sm mb-2">Resumen operacional</h2>
+        <ul class="space-y-2">
+          {% for line in detail.human_summaries[:6] %}
+          <li class="text-sm">
+            <span class="badge badge-sm {{ badge_class(line) }}">{{ icon_char(line) }}</span>
+            {{ line.headline }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </aside>
+  <div class="flex-1">
+    <div class="tabs tabs-boxed mb-4">
+      <a class="tab {% if tab == 'timeline' %}tab-active{% endif %}" href="/sessions/{{ session_id }}?correlation_id={{ correlation_id }}&tab=timeline">Timeline</a>
+      <a class="tab" href="/sessions/{{ session_id }}/diagnostics?correlation_id={{ correlation_id }}">Diagnostics</a>
+      <a class="tab" href="/sessions/{{ session_id }}/replay?correlation_id={{ correlation_id }}">Replay</a>
+      <a class="tab" href="/sessions/{{ session_id }}/adaptive?correlation_id={{ correlation_id }}">Adaptive</a>
+    </div>
+    <div id="timeline"
+         hx-get="/sessions/{{ session_id }}/timeline?correlation_id={{ correlation_id }}"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "partials/timeline.html" %}
+    </div>
+  </div>
+</div>
+{% endblock %}

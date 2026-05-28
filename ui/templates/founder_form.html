@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Execute — CEO-Agent Ops{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Founder request</h1>
+<div class="card max-w-xl">
+  <div class="card-body">
+    <form method="post" action="/ui/founder/request" class="flex flex-col gap-3">
+      <label class="form-control">
+        <span class="label-text">Mensaje</span>
+        <textarea class="textarea textarea-bordered" name="message" rows="4" required placeholder="Describe la tarea operacional…"></textarea>
+      </label>
+      <label class="form-control">
+        <span class="label-text">Session ID (opcional)</span>
+        <input class="input input-bordered input-sm font-mono" name="session_id" />
+      </label>
+      <button type="submit" class="btn btn-primary">Ejecutar</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Replay — {{ session_id }}{% endblock %}
+{% block content %}
+{% include "partials/session_nav.html" %}
+<h1 class="text-xl font-bold mb-4">Replay inspector</h1>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="stat-card">
+    <div class="stat-title">Replay confidence</div>
+    <div class="stat-value">{{ "%.0f"|format(replay.analytics.replay_confidence * 100) }}%</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Drift severity</div>
+    <div class="stat-value {% if replay.analytics.drift_severity > 0 %}text-warning{% endif %}">
+      {{ "%.2f"|format(replay.analytics.drift_severity) }}
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Outcome match</div>
+    <div class="stat-value">{{ "yes" if replay.analytics.outcome_match else "no" }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Orchestration version</div>
+    <div class="stat-value text-sm font-mono">{{ replay.analytics.orchestration_version or '—' }}</div>
+  </div>
+</div>
+
+{% for line in detail.human_summaries if line.source in ('replay_drift', 'replay_confidence', 'delegation_frozen') %}
+<div class="alert alert-warning mb-2">{{ line.headline }}</div>
+{% endfor %}
+
+<div class="flex gap-2 mb-4">
+  <a class="btn btn-sm {% if mode == 'frozen' %}btn-primary{% else %}btn-ghost{% endif %}"
+     href="/sessions/{{ session_id }}/replay?correlation_id={{ correlation_id }}&mode=frozen">Frozen</a>
+  <a class="btn btn-sm {% if mode == 'live' %}btn-primary{% else %}btn-ghost{% endif %}"
+     href="/sessions/{{ session_id }}/replay?correlation_id={{ correlation_id }}&mode=live">Live</a>
+</div>
+
+{% if replay.analytics.drift_fields %}
+<p class="text-sm mb-4">Drift fields: <code>{{ replay.analytics.drift_fields|join(', ') }}</code></p>
+{% endif %}
+
+{% if replay.replay_session %}
+<details class="collapse collapse-arrow bg-base-200">
+  <summary class="collapse-title">Replay session snapshots ({{ replay.replay_session.snapshots|length }})</summary>
+  <div class="collapse-content">
+    <pre class="text-xs overflow-auto max-h-96">{{ replay.replay_session|tojson(indent=2) }}</pre>
+  </div>
+</details>
+{% else %}
+<p class="opacity-60 text-sm">Replay ejecutivo requiere permiso REPLAY_EXECUTE.</p>
+{% endif %}
+
+<h2 class="font-semibold mt-6 mb-2">Governance events</h2>
+<ul class="space-y-1">
+  {% for e in replay.governance_events %}
+  <li class="badge badge-ghost">{{ e.action }}</li>
+  {% else %}
+  <li class="opacity-60">Sin eventos de governance.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

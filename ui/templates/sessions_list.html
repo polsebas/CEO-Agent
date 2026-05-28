@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Sessions — CEO-Agent Ops{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <h1 class="text-2xl font-bold">Sesiones</h1>
+  <form class="flex gap-2" method="get">
+    <input class="input input-bordered input-sm" name="search" value="{{ search }}" placeholder="Buscar…" />
+    <label class="label cursor-pointer gap-2">
+      <input type="checkbox" name="degraded_only" value="true" class="checkbox checkbox-sm" {% if degraded_only %}checked{% endif %} />
+      Solo degradadas
+    </label>
+    <button class="btn btn-sm btn-primary" type="submit">Filtrar</button>
+  </form>
+</div>
+{% set sessions = sessions %}
+{% include "partials/session_table.html" %}
+{% endblock %}

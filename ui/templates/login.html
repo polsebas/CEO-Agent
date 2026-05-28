@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Login — CEO-Agent Ops{% endblock %}
+{% block content %}
+<div class="card max-w-md mx-auto mt-16">
+  <div class="card-body">
+    <h1 class="card-title">Ingreso operacional</h1>
+    <p class="text-sm opacity-70">Demo MVP — seleccioná rol para JWT de sesión.</p>
+    <form method="post" action="/login" class="flex flex-col gap-3">
+      <label class="form-control">
+        <span class="label-text">Usuario</span>
+        <input class="input input-bordered" name="user_id" value="demo-operator" />
+      </label>
+      <label class="form-control">
+        <span class="label-text">Rol</span>
+        <select class="select select-bordered" name="role">
+          {% for r in roles %}
+          <option value="{{ r }}" {% if r == 'operator' %}selected{% endif %}>{{ r }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary">Entrar</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

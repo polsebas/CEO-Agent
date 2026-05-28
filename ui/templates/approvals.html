@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Approvals — CEO-Agent Ops{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Cola de aprobaciones</h1>
+{% if not can_approve %}
+<div class="alert alert-info mb-4">Vista de solo lectura — las aprobaciones requieren rol reviewer/admin/founder.</div>
+{% endif %}
+
+<div id="approval-list" class="space-y-4">
+  {% for card in cards %}
+  <div id="approval-{{ card.approval.id }}" class="card">
+    <div class="card-body">
+      <div class="flex justify-between flex-wrap gap-2">
+        <div>
+          <span class="font-mono text-sm">{{ card.approval.id }}</span>
+          <h2 class="font-semibold">{{ card.approval.proposal.action if card.approval.proposal else 'Action' }}</h2>
+          <p class="text-sm opacity-70">Risk level {{ card.approval.risk_level }} · corr {{ card.approval.correlation_id }}</p>
+        </div>
+        {% if can_approve %}
+        <form method="post" action="/ui/approvals/{{ card.approval.id }}/approve">
+          <button type="submit" class="btn btn-success btn-sm">Aprobar</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if card.human_context %}
+      <ul class="mt-3 text-sm space-y-1">
+        {% for line in card.human_context %}
+        <li><span class="badge badge-sm {{ badge_class(line) }}">{{ line.headline }}</span></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <p class="opacity-60">No hay aprobaciones pendientes.</p>
+  {% endfor %}
+</div>
+{% endblock %}

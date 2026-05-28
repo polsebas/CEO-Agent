@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CEO-Agent Ops{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Dashboard operacional</h1>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <div class="stat-card">
+    <div class="stat-title">Sesiones recientes</div>
+    <div class="stat-value">{{ state.recent_sessions|length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Degradadas</div>
+    <div class="stat-value text-warning">{{ state.degraded_sessions|length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-title">Aprobaciones pendientes</div>
+    <div class="stat-value">{{ state.pending_count }}</div>
+  </div>
+</div>
+
+{% if not state.runtime_healthy %}
+<div class="alert alert-warning mb-4">Runtime health: degraded (database check failed)</div>
+{% endif %}
+
+<section class="mb-8">
+  <h2 class="text-lg font-semibold mb-2">Sesiones recientes</h2>
+  {% with sessions=state.recent_sessions %}
+  {% include "partials/session_table.html" %}
+  {% endwith %}
+</section>
+
+{% if state.pending_approvals %}
+<section class="mb-8">
+  <h2 class="text-lg font-semibold mb-2">Aprobaciones pendientes</h2>
+  <ul class="space-y-2">
+    {% for a in state.pending_approvals[:5] %}
+    <li class="card p-3">
+      <span class="font-mono text-sm">{{ a.id[:8] }}…</span>
+      — {{ a.proposal.action if a.proposal else 'action' }}
+      <a class="link ml-2" href="/approvals">Ver cola</a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if state.tool_warnings %}
+<section>
+  <h2 class="text-lg font-semibold mb-2">Tool reliability warnings</h2>
+  <ul class="space-y-1">
+    {% for t in state.tool_warnings[:5] %}
+    <li class="badge badge-warning">{{ t.tool_name }} — success {{ (t.success_rate * 100)|int }}%</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

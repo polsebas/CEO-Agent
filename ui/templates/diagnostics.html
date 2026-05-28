@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Diagnostics — {{ session_id }}{% endblock %}
+{% block content %}
+{% include "partials/session_nav.html" %}
+<h1 class="text-xl font-bold mb-4">Diagnostics</h1>
+
+{% for line in detail.human_summaries %}
+<div class="alert {% if line.severity == 'critical' %}alert-error{% elif line.severity == 'warning' %}alert-warning{% else %}alert-info{% endif %} mb-2">
+  {{ line.headline }}
+</div>
+{% endfor %}
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="card">
+    <div class="card-body">
+      <h2 class="font-semibold">Span summary</h2>
+      <pre class="text-xs">{{ data.diagnostics.span_summary|tojson(indent=2) }}</pre>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h2 class="font-semibold">Telemetry summary</h2>
+      <pre class="text-xs">{{ data.diagnostics.telemetry_summary|tojson(indent=2) }}</pre>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h2 class="font-semibold">Health</h2>
+      <pre class="text-xs">{{ data.health|tojson(indent=2) if data.health else 'null' }}</pre>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h2 class="font-semibold">Anomalies ({{ data.diagnostics.anomaly_events|length }})</h2>
+      <pre class="text-xs overflow-auto max-h-48">{{ data.diagnostics.anomaly_events|tojson(indent=2) }}</pre>
+    </div>
+  </div>
+</div>
+
+<details class="collapse collapse-arrow mt-4">
+  <summary class="collapse-title">Spans detail ({{ data.spans.total }})</summary>
+  <div class="collapse-content"><pre class="text-xs max-h-96 overflow-auto">{{ data.spans|tojson(indent=2) }}</pre></div>
+</details>
+{% endblock %}

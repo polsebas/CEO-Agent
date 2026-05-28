@@ -1,0 +1,8 @@
+{
+  "demo_id": "founder_strategy",
+  "title": "Founder workflow",
+  "description": "Demuestra orchestration transaccional desde founder request",
+  "session_id": "demo-founder-strategy",
+  "correlation_id": "demo-founder-strategy-corr",
+  "message": "Review Q3 strategy priorities and identify top blockers across engineering"
+}

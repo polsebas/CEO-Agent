@@ -2,7 +2,7 @@
 
 Multi-agent platform for executive operations with a **governed cognitive runtime**, built as an enterprise-grade Vertical Slice before scaling to the full suite (CEO, CFO, COO, CTO, CMO).
 
-The goal is not merely to “have agents”, but to **enforce the architectural contract**: non-bypassable governance, deterministic replay, transactional outbox, real cognition via Agno, and hardened gate validation.
+The goal is not merely to “have agents”, but to **enforce the architectural contract**: non-bypassable governance, deterministic replay, transactional outbox, real cognition via Agno, hardened gate validation, and an **operational console** so humans can run sessions without reading raw logs.
 
 > **Languages:** [Español](README.md) · English
 
@@ -27,9 +27,11 @@ CEO-Agent coordinates executive decisions across specialized agents with:
 | Layer | Technology |
 |-------|------------|
 | Runtime / API | Python 3.11+, FastAPI, Uvicorn |
+| Operational console (MVP-1) | Jinja2 SSR, HTMX, Tailwind CSS |
 | Agents | Agno |
 | Contracts | Pydantic v2 |
 | Auth | JWT (`python-jose`) + RBAC |
+| Observability | OpenTelemetry + Prometheus (`/metrics`) |
 | Persistence | PostgreSQL (asyncpg) + in-memory fallback |
 | Cache | Redis (with in-memory fallback) |
 | Local infra | Docker Compose (Postgres + Redis) |
@@ -41,7 +43,7 @@ CEO-Agent coordinates executive decisions across specialized agents with:
 ## Architecture
 
 ```text
-Founder / API
+Founder / API / Ops Console (HTMX)
      │
      ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -55,6 +57,7 @@ Founder / API
               │                           │
               │                           ├── RuntimeStateMachine
               │                           ├── PolicyEngine + Crisis
+              │                           ├── Adaptive cognition (RRM-3)
               │                           ├── ContextWindowManager L1-L5
               │                           ├── StructuredAgentRunner → Agno
               │                           └── Session locks (advisory)
@@ -62,14 +65,15 @@ Founder / API
               └─────────────┬─────────────┘
                             ▼
               ┌─────────────────────────────┐
-              │  persist_execution_bundle   │
+              │  persist_runtime_tx         │
               │  decision + effect + outbox │
               └─────────────────────────────┘
                             │
               ┌─────────────┴─────────────┐
               ▼                           ▼
         Executive Timeline            Replay Engine
-        (outbox + records)         (frozen / live)
+        Session diagnostics         (frozen / live)
+        (UIQueryFacade → UI)
 ```
 
 ### Design principle
@@ -89,9 +93,20 @@ CEO-Agent/
 ├── agents/              # Agno factory + expanded delegation (CFO/COO/CMO)
 ├── api/
 │   ├── auth.py          # JWT + RBAC
-│   └── main.py          # FastAPI endpoints
+│   ├── main.py          # FastAPI endpoints + UI mount
+│   ├── diagnostics.py # RRM-2 diagnostics API
+│   ├── adaptive.py      # RRM-3 adaptive cognition API
+│   └── sessions.py      # Session listing (MVP-1)
+├── ui/                  # Operational SSR console (MVP-1)
+│   ├── routes/          # Dashboard, sessions, replay, approvals…
+│   ├── templates/       # Jinja2 + HTMX partials
+│   ├── static/          # CSS, HTMX
+│   └── services/        # UIQueryFacade, human_labels
 ├── core/
 │   ├── orchestrator.py  # ManualOrchestrator (primary path)
+│   ├── diagnostics.py # DiagnosticsService (read-only)
+│   ├── session_summary_builder.py  # Human-readable narratives
+│   ├── session_list.py  # Session index
 │   ├── runtime.py       # RuntimeStateMachine + transitions
 │   ├── agent_runner.py  # StructuredAgentRunner (Agno + retry)
 │   ├── approval_service.py  # Immutable approval workflow
@@ -104,6 +119,10 @@ CEO-Agent/
 │   ├── timeline.py      # Executive timeline
 │   ├── health.py        # Persisted agent health
 │   └── mcp_security.py  # MCP allowlist / anti-SSRF
+├── demo/                # Deterministic demo fixtures (MVP-1)
+├── scripts/
+│   ├── seed_demo.py     # Demo session seed
+│   └── ci-local.sh
 ├── schemas/             # Pydantic contracts (runtime, approvals, world, etc.)
 ├── tools/
 │   ├── router.py        # Tool router + policy gate
@@ -115,9 +134,16 @@ CEO-Agent/
 │   └── outbox_processor.py
 ├── tests/
 │   ├── unit/
+│   ├── gate/            # RRM milestones
+│   ├── ui/              # MVP-1 console tests
 │   └── vertical_slice/  # Gate tests + governance E2E
+├── docs/
+│   ├── RRM2.md
+│   ├── RRM3.md
+│   └── MVP1_DEMO.md     # Operational demo script
 ├── docker-compose.yml
 ├── main.py              # Uvicorn entry point
+├── package.json         # Tailwind CLI (UI)
 └── pyproject.toml
 ```
 
@@ -125,6 +151,9 @@ CEO-Agent/
 
 | Document | Content |
 |----------|---------|
+| `docs/MVP1_DEMO.md` | Operational console demo script (&lt;10 min) |
+| `docs/RRM2.md` | Runtime Intelligence — diagnostics, spans, telemetry |
+| `docs/RRM3.md` | Adaptive cognition — policy, stability, governance |
 | `spec_mvp_ceo_agent_platform_v_1.md` | Platform MVP spec |
 | `Guía de Arquitectura para Sistemas de Agentes Autónomos (Enterprise AI).md` | Enterprise patterns |
 | `Guía de Entorno de Desarrollo para Sistemas de Agentes de IA (v1.0).md` | Development conventions |
@@ -203,39 +232,92 @@ Health check:
 curl http://localhost:8000/health
 ```
 
+### 5. Operational console (MVP-1)
+
+```bash
+# Optional demo session seed
+.venv/bin/python scripts/seed_demo.py
+
+# Start API (same process serves JSON + UI)
+.venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Open **http://localhost:8000/login** and pick a role:
+
+| Role | Demo use |
+|------|----------|
+| `operator` | Run founder requests, view sessions/replay |
+| `reviewer` | Approve pending actions |
+| `readonly` | Observe dashboard and diagnostics |
+
+Full walkthrough: [`docs/MVP1_DEMO.md`](docs/MVP1_DEMO.md).
+
+**Main screens:**
+
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard — recent/degraded sessions, approvals |
+| `/sessions` | List with search and filters |
+| `/sessions/{id}?correlation_id=` | Detail + unified timeline (HTMX 5s refresh) |
+| `/sessions/{id}/replay` | Replay inspector (frozen/live) |
+| `/sessions/{id}/diagnostics` | Diagnostics + human summaries |
+| `/sessions/{id}/adaptive` | Adaptive policy and stability |
+| `/approvals` | Approval queue |
+| `/sessions/new` | Founder request (operator) |
+
+**CSS (optional):** rebuild Tailwind with `npm install && npm run build:css`.
+
+The UI **does not HTTP-loopback to `/api/v1`** — it reads via `UIQueryFacade` → core services (`DiagnosticsService`, `policy_engine`, etc.).
+
 ---
 
 ## Authentication and RBAC
 
-All mutating endpoints require a JWT Bearer token unless `AUTH_DISABLED=true`.
+JSON endpoints require a JWT Bearer token. The UI console accepts an HttpOnly `ceo_token` cookie (via `/login`) or the same Bearer header.
 
-### Roles
+Unless `AUTH_DISABLED=true` (dev/tests only).
 
-| Role | Level | Typical use |
-|------|-------|-------------|
-| `readonly` | 0 | Timeline, read-only access |
-| `operator` | 1 | Low-risk operations |
-| `admin` | 2 | Replay, agent health |
-| `founder` | 3 | Executive requests, prepare/approve |
+### Roles (MVP-1)
 
-### Permission matrix
+| Role | Level | Execute / prepare | Approve | Observe |
+|------|-------|-------------------|---------|---------|
+| `readonly` | 0 | — | — | sessions, diagnostics, timeline, approvals (read) |
+| `operator` | 1 | founder request, prepare, replay execute | — | sessions, diagnostics |
+| `reviewer` | 2 | — | approve | sessions, diagnostics, approvals |
+| `admin` | 3 | full operational | approve (level 2+) | + agents health |
+| `founder` | 4 | all permissions | all | all |
 
-| Endpoint | Auth | Minimum role |
-|----------|------|--------------|
-| `GET /health` | No | — |
-| `POST /api/v1/founder/request` | Yes | `founder` |
-| `POST /api/v1/actions/prepare` | Yes | `founder` |
-| `POST /api/v1/actions/approve/{id}` | Yes | `founder` |
-| `GET /api/v1/approvals` | Yes | `readonly` |
-| `GET /api/v1/timeline` | Yes | `readonly` |
-| `GET /api/v1/replay/{session_id}` | Yes | `admin` |
-| `GET /api/v1/agents/health` | Yes | `admin` |
+**Operator / reviewer** separation enables human-in-the-loop demos: operators execute; reviewers approve.
+
+### Permission matrix (API)
+
+| Endpoint | Auth | Permission / role |
+|----------|------|-------------------|
+| `GET /health`, `GET /metrics` | No | — |
+| `GET /api/v1/sessions` | Yes | `SESSION_READ` |
+| `POST /api/v1/founder/request` | Yes | `FOUNDER_REQUEST` (operator+) |
+| `POST /api/v1/actions/prepare` | Yes | `ACTION_PREPARE` (operator+) |
+| `POST /api/v1/actions/approve/{id}` | Yes | `ACTION_APPROVE` (reviewer+) |
+| `GET /api/v1/approvals` | Yes | `APPROVALS_READ` |
+| `GET /api/v1/timeline` | Yes | `TIMELINE_READ` |
+| `GET /api/v1/replay/{session_id}` | Yes | `REPLAY_EXECUTE` (operator+) |
+| `GET /api/v1/sessions/{id}/diagnostics` | Yes | `DIAGNOSTICS_READ` |
+| `GET /api/v1/sessions/{id}/health` | Yes | `DIAGNOSTICS_READ` |
+| `GET /api/v1/sessions/{id}/spans` | Yes | `DIAGNOSTICS_READ` |
+| `GET /api/v1/replay/{id}/analysis` | Yes | `DIAGNOSTICS_READ` |
+| `GET /api/v1/sessions/{id}/adaptive-policy` | Yes | `DIAGNOSTICS_READ` |
+| `GET /api/v1/replay/{id}/governance` | Yes | `DIAGNOSTICS_READ` |
+| `GET /api/v1/agents/health` | Yes | `AGENTS_HEALTH` (admin+) |
+
+HTML routes (`/`, `/sessions`, `/approvals`, …) enforce the same permissions via `UIQueryFacade`.
 
 ### Generate a test token
 
 ```python
-from api.auth import create_test_token, UserRole
-token = create_test_token(user_id="founder-1", role=UserRole.FOUNDER)
+from api.auth import create_test_token
+from core.roles import UserRole
+
+token = create_test_token(user_id="operator-1", role=UserRole.OPERATOR)
 # Header: Authorization: Bearer <token>
 ```
 
@@ -277,6 +359,12 @@ Creates an approval with an **immutable payload** (checksum + expiration).
 
 Approves and executes the frozen payload. Re-validates policy, checksum, and expiration. **`skip_policy` is not allowed.**
 
+### `GET /api/v1/sessions`
+
+Operational session list (from `session_diagnostics`).
+
+Query params: `limit`, `offset`, `status`, `health`, `has_pending_approvals`, `search`, `degraded_only`.
+
 ### `GET /api/v1/timeline?correlation_id=`
 
 Executive timeline derived exclusively from `OutboxEvent` + `DecisionRecord` + `SideEffectRecord`.
@@ -290,18 +378,34 @@ Executive timeline derived exclusively from `OutboxEvent` + `DecisionRecord` + `
 
 Per-agent health metrics (success rate, degraded mode, latency).
 
+### Diagnostics & adaptive (RRM-2 / RRM-3)
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v1/sessions/{id}/diagnostics?correlation_id=` | Unified `SessionDiagnostics` snapshot |
+| `GET /api/v1/sessions/{id}/health` | `RuntimeHealth` |
+| `GET /api/v1/sessions/{id}/spans` | Execution span tree |
+| `GET /api/v1/sessions/{id}/telemetry` | Cognitive telemetry |
+| `GET /api/v1/replay/{id}/analysis?correlation_id=` | `ReplayAnalytics` (drift, confidence) |
+| `GET /api/v1/sessions/{id}/adaptive-policy` | Adaptive policy snapshot |
+| `GET /api/v1/sessions/{id}/stability` | Session stability events |
+| `GET /api/v1/replay/{id}/governance` | Governance + replay analytics |
+| `GET /api/v1/tools/reliability` | Tool reliability profiles |
+
+See `docs/RRM2.md` and `docs/RRM3.md` for full contracts.
+
 ---
 
 ## Governance flow (approvals)
 
 ```text
-PREPARE
+Operator: FOUNDER REQUEST / PREPARE
   ↓
 Persist ImmutableActionProposal (checksum + expires_at)
   ↓
 Initial policy evaluation
   ↓
-APPROVE (founder)
+Reviewer: APPROVE
   ↓
 Re-validate policy + checksum + expiration
   ↓
@@ -309,6 +413,8 @@ Execute frozen payload (no skip_policy)
   ↓
 Persist SideEffectRecord + OutboxEvent (atomic TX)
 ```
+
+In the UI console: operator at `/sessions/new` → reviewer at `/approvals`.
 
 Key fields on `ImmutableActionProposal`:
 
@@ -411,19 +517,31 @@ The router (`tools/router.py`) normalizes all invocations to `ToolResult` and ap
 
 ## Tests
 
+**Before every commit/PR** (same scope as CI in `.github/workflows/rrm1-gate.yml`):
+
 ```bash
-.venv/bin/pytest tests/ -v
+pip install -e ".[dev]"
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
+```
+
+With local Postgres (`docker compose up -d db`):
+
+```bash
+export DATABASE_URL=postgresql://ceo:ceo@localhost:5432/ceo_agent
+export USE_IN_MEMORY_STORE=false
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
 ```
 
 | Suite | Validates |
 |-------|-----------|
-| `tests/unit/` | Runtime, context, preprocessor, structured retry |
-| `tests/vertical_slice/test_gate.py` | VS gate: orchestration, replay, timeline, approvals, concurrency |
-| `tests/vertical_slice/test_governance_hardening.py` | Auth 401, RBAC 403, expiry, checksum tamper, transitions |
+| `tests/unit/` | Runtime, context, preprocessor, session summaries |
+| `tests/gate/` | Replay, outbox, RRM-1..3 milestones |
+| `tests/ui/` | MVP-1 console (dashboard, timeline, replay, export) |
+| `tests/governance/` | Operator/reviewer RBAC matrix |
+| `tests/vertical_slice/` | VS gate + governance E2E |
+| `tests/integration/test_postgres_*` | Postgres integration |
 
 Tests use `USE_IN_MEMORY_STORE=true` and `AUTH_DISABLED=true` via `conftest.py`.
-
-**Current status:** 30 tests passing.
 
 ---
 
@@ -445,13 +563,15 @@ The VS is considered production-grade when:
 
 | Priority | Item |
 |----------|------|
-| Should Have | OpenTelemetry tracing |
-| Should Have | Replay diff visualization |
+| Done (RRM-2) | OpenTelemetry traces (OTLP) + Prometheus metrics at `/metrics` |
+| Done (RRM-3) | Adaptive cognition, tool reliability, session stability |
+| Done (MVP-1) | Operational SSR/HTMX console, human summaries, demo seed |
+| Should Have | Replay diff visualization in UI |
 | Should Have | Approval cryptographic signing |
 | Should Have | Real multi-worker tests (Postgres + processes) |
+| Could Have | SSE live timeline updates |
 | Could Have | Temporal integration |
 | Could Have | Kafka migration |
-| Could Have | Agno Team comparison benchmark |
 
 ---
 
@@ -463,13 +583,15 @@ The VS is considered production-grade when:
 - Side effects always via router + policy
 - Timeline and replay never from runtime memory
 - Orchestrator coordinates; Agno thinks
+- UI reads via `UIQueryFacade` — **no HTTP loopback** to `/api/v1` from `ui/`
+- UI mutations → `ManualOrchestrator` / `approval_service` (same authority as API)
 
 ### Lint / typecheck
 
 The project uses `pytest` as the primary gate. Run tests before every PR:
 
 ```bash
-.venv/bin/pytest tests/ -q --cache-clear
+OTEL_SDK_DISABLED=true ./scripts/ci-local.sh
 ```
 
 ---

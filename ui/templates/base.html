@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}CEO-Agent Ops{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/htmx.min.js" defer></script>
+</head>
+<body class="min-h-screen bg-base text-base-content">
+  {% if auth is defined %}
+  <header class="navbar border-b border-base-300 px-4">
+    <div class="flex-1">
+      <a href="/" class="font-bold text-lg">CEO-Agent Ops</a>
+      <span class="badge badge-ghost ml-2">{{ auth.role.value }}</span>
+    </div>
+    <nav class="flex gap-2">
+      {% for item in nav_items %}
+      <a href="{{ item.href }}" class="btn btn-ghost btn-sm">{{ item.label }}</a>
+      {% endfor %}
+      <form action="/logout" method="post">
+        <button type="submit" class="btn btn-outline btn-sm">Salir</button>
+      </form>
+    </nav>
+  </header>
+  {% endif %}
+  <main class="container mx-auto p-4 max-w-6xl">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
