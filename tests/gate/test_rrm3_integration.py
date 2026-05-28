@@ -108,25 +108,21 @@ async def test_resolve_policy_bounded_invocations():
 
 
 @pytest.mark.rrm3
-def test_adaptive_signals_ignore_stale_health_correlation():
-    import asyncio
-
+@pytest.mark.asyncio
+async def test_adaptive_signals_ignore_stale_health_correlation():
     from core.adaptive_signals import collect_adaptive_signals
     from core.intelligence_store import replace_health
     from schemas.runtime_health import RuntimeHealth
 
-    async def _run():
-        replace_health(
-            RuntimeHealth(
-                correlation_id="other-corr",
-                session_id="stale-s",
-                replay_confidence=0.1,
-                health_band=HealthBand.CRITICAL,
-                degraded_mode_active=True,
-            )
+    replace_health(
+        RuntimeHealth(
+            correlation_id="other-corr",
+            session_id="stale-s",
+            replay_confidence=0.1,
+            health_band=HealthBand.CRITICAL,
+            degraded_mode_active=True,
         )
-        signals = await collect_adaptive_signals("stale-s", "new-corr")
-        assert signals.replay_confidence == 1.0
-        assert signals.health_band == HealthBand.HEALTHY
-
-    asyncio.get_event_loop().run_until_complete(_run())
+    )
+    signals = await collect_adaptive_signals("stale-s", "new-corr")
+    assert signals.replay_confidence == 1.0
+    assert signals.health_band == HealthBand.HEALTHY
