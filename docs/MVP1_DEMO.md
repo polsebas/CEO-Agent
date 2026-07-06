@@ -2,6 +2,14 @@
 
 Guía reproducible (&lt;10 min) para stakeholders no técnicos.
 
+## Orden recomendado (rama `demo/facilrentacar`)
+
+1. **[Demo A — CFO compensación](../content/A-cfo-compensation.md)** — approval E2E (empezar acá)
+2. Demos MVP-1 genéricos (abajo) — runtime, adaptive, replay
+3. **[Demo C — CMO LinkedIn](../content/C-cmo-linkedin.md)** — solo después de validar A en UI
+
+Índice completo: [`content/README.md`](../content/README.md)
+
 ## Prerrequisitos
 
 ```bash
@@ -51,13 +59,19 @@ Abrir `http://localhost:8000/login` y elegir rol según el paso.
 
 Stakeholder entiende valor **sin** leer logs raw ni JSON crudo — solo timeline + human summaries + approvals separados.
 
-## FacilRentaCar (4 escenarios gobernados)
+## FacilRentaCar — Demo A primero
 
-Ver [`docs/FACILRENTACAR_DEMO.md`](FACILRENTACAR_DEMO.md). Seed **por escenario** (no incluido en seed default):
+Ver [`content/A-cfo-compensation.md`](../content/A-cfo-compensation.md). Seed:
 
 ```bash
-python scripts/seed_demo.py --scenario compensation   # | reactivation | occupancy | cancellation
-python scripts/seed_demo.py --facilrentacar-all       # los 4 escenarios FRC
+python scripts/seed_demo.py --scenario compensation
+```
+
+Otros escenarios (post-A): [`docs/FACILRENTACAR_DEMO.md`](FACILRENTACAR_DEMO.md)
+
+```bash
+python scripts/seed_demo.py --scenario reactivation   # | occupancy | cancellation
+python scripts/seed_demo.py --facilrentacar-all
 ```
 
 Los efectos mutantes se ejecutan vía `approval_service → execute_tool(agent=system, post_approval=True)`, no outbox.

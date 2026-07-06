@@ -25,7 +25,7 @@ Para eventos de dominio FacilRentaCar, **`session_id` y `correlation_id` deben c
 | `--scenario occupancy` | Tarifas dinámicas COO→CFO→CEO | 2h |
 | `--scenario cancellation` | Override con dropdown de opciones | 2h |
 
-## Quick start
+## Quick start — Demo A (CFO)
 
 ```bash
 python scripts/seed_demo.py --scenario compensation
@@ -34,7 +34,9 @@ uvicorn api.main:app --reload
 # sesión → http://localhost:8000/sessions/demo-compensation-001?correlation_id=demo-compensation-001
 ```
 
-## Escenario 3 — contrato dropdown
+Guion narrativo: [`content/A-cfo-compensation.md`](../content/A-cfo-compensation.md)
+
+## Otros escenarios
 
 - `prepare_approval`: `parameters.options[]` + `recommended_option` (inmutable, entra en checksum)
 - UI/API: reviewer elige `selected_option` / `override_type` **obligatorio** antes de aprobar
