@@ -1,0 +1,22 @@
+{
+  "demo_id": "cancellation",
+  "title": "Override cancelación corporativa",
+  "description": "Dos opciones explícitas para approval con dropdown",
+  "session_id": "demo-cancellation-001",
+  "correlation_id": "demo-cancellation-001",
+  "event_type": "corporate_cancellation_override_request",
+  "client_id": "CORP-0088",
+  "client_name": "Grupo Constructor Mendoza S.A.",
+  "client_history_months": 18,
+  "client_total_reservations_ytd": 34,
+  "client_revenue_ytd_ars": 2840000.0,
+  "reservations_to_cancel": [
+    {"id": "RES-2024-0901", "amount_ars": 220000.0, "start": "2024-12-10"},
+    {"id": "RES-2024-0902", "amount_ars": 195000.0, "start": "2024-12-12"},
+    {"id": "RES-2024-0903", "amount_ars": 210000.0, "start": "2024-12-15"}
+  ],
+  "total_cancellation_amount_ars": 625000.0,
+  "cancellation_policy_penalty_pct": 0.30,
+  "force_majeure_document": "nota_directorio_2024_12_01.pdf",
+  "requested_by": "founder"
+}

@@ -24,6 +24,7 @@ UNIT_GATE=(
   tests/governance
   tests/experimental
   tests/gate
+  tests/smoke
   tests/vertical_slice
   tests/integration/test_session_contention.py
 )

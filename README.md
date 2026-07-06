@@ -152,6 +152,8 @@ CEO-Agent/
 | Documento | Contenido |
 |-----------|-----------|
 | `docs/MVP1_DEMO.md` | Guión demo consola operacional (&lt;10 min) |
+| `docs/FACILRENTACAR_DEMO.md` | 4 escenarios FacilRentaCar gobernados (compensación, flota, tarifas, cancelación) |
+| `docs/CEO-Agent-FacilRentaCar-Demo-Scenarios.md` | Spec detallada integración FacilRentaCar |
 | `docs/RRM2.md` | Runtime Intelligence — diagnostics, spans, telemetry |
 | `docs/RRM3.md` | Adaptive cognition — policy, stability, governance |
 | `spec_mvp_ceo_agent_platform_v_1.md` | Spec MVP de la plataforma |

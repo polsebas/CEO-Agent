@@ -1,0 +1,20 @@
+{
+  "demo_id": "reactivation",
+  "title": "Reactivación flota post-mantenimiento",
+  "description": "COO prioriza vehículos, CEO eleva activación gobernada",
+  "session_id": "demo-reactivation-001",
+  "correlation_id": "demo-reactivation-001",
+  "event_type": "fleet_maintenance_completed",
+  "completed_at": "2024-12-05T08:00:00Z",
+  "vehicles_returned": [
+    {"id": "VEH-205", "model": "Ford Ranger 2022", "category": "Pickup", "branch": "Mendoza Centro"},
+    {"id": "VEH-206", "model": "Ford Ranger 2022", "category": "Pickup", "branch": "Mendoza Centro"},
+    {"id": "VEH-301", "model": "Toyota Corolla 2023", "category": "Sedan", "branch": "San Rafael"},
+    {"id": "VEH-302", "model": "Toyota Corolla 2023", "category": "Sedan", "branch": "San Rafael"},
+    {"id": "VEH-401", "model": "Chevrolet Tracker 2023", "category": "SUV", "branch": "Malargüe"}
+  ],
+  "total_vehicles": 5,
+  "branches_affected": ["Mendoza Centro", "San Rafael", "Malargüe"],
+  "pending_reservations_without_vehicle": 7,
+  "requested_by": "system"
+}

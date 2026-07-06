@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     google_gemini_model: str = "gemini-3.5-flash"
     llm_provider: LlmProvider = "auto"
     github_mcp_url: str = "http://localhost:8001"
+    facilrentacar_mcp_url: str = "http://localhost:8002"
     github_repo: str = "owner/repo"
     use_in_memory_store: bool = False
 

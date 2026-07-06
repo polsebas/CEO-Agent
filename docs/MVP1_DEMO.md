@@ -6,7 +6,7 @@ Guía reproducible (&lt;10 min) para stakeholders no técnicos.
 
 ```bash
 export AUTH_DISABLED=true   # opcional para dev local
-python scripts/seed_demo.py
+python scripts/seed_demo.py   # solo escenarios MVP-1 (sin FacilRentaCar)
 uvicorn main:app --reload
 ```
 
@@ -50,3 +50,14 @@ Abrir `http://localhost:8000/login` y elegir rol según el paso.
 ## Criterio de éxito
 
 Stakeholder entiende valor **sin** leer logs raw ni JSON crudo — solo timeline + human summaries + approvals separados.
+
+## FacilRentaCar (4 escenarios gobernados)
+
+Ver [`docs/FACILRENTACAR_DEMO.md`](FACILRENTACAR_DEMO.md). Seed **por escenario** (no incluido en seed default):
+
+```bash
+python scripts/seed_demo.py --scenario compensation   # | reactivation | occupancy | cancellation
+python scripts/seed_demo.py --facilrentacar-all       # los 4 escenarios FRC
+```
+
+Los efectos mutantes se ejecutan vía `approval_service → execute_tool(agent=system, post_approval=True)`, no outbox.

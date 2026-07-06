@@ -18,6 +18,32 @@ from schemas.spans import SpanStatus, SpanType
 from schemas.effects import SideEffectRecord
 from tools.router import execute_tool
 
+EXECUTION_OVERRIDE_WHITELIST: dict[str, set[str]] = {
+    "execute_cancellation_override": {"override_type"},
+}
+
+GOVERNANCE_STRIP_KEYS = {"options", "recommended_option", "previous_rate_ars_per_day"}
+
+EXECUTABLE_PARAM_KEYS: dict[str, set[str]] = {
+    "execute_cancellation_override": {
+        "client_id",
+        "reservation_ids",
+        "override_type",
+        "override_reason",
+        "approval_id",
+    },
+    "apply_reservation_discount": {"reservation_id", "discount_pct", "reason", "approval_id"},
+    "publish_rate_adjustment": {
+        "categories",
+        "new_rate_ars_per_day",
+        "valid_from",
+        "valid_to",
+        "adjustment_reason",
+        "approval_id",
+    },
+    "activate_vehicles": {"vehicle_ids", "activation_notes", "approval_id"},
+}
+
 
 def proposal_checksum(proposal: ImmutableActionProposal) -> str:
     return stable_hash(proposal.model_dump(mode="json", exclude={"checksum"}))
@@ -48,6 +74,7 @@ def create_immutable_proposal(
     approval_level: int,
     expires_at: datetime,
     task_id: str | None = None,
+    rollback_strategy: str | None = None,
 ) -> ImmutableActionProposal:
     proposal = ImmutableActionProposal(
         id=str(uuid4()),
@@ -61,17 +88,22 @@ def create_immutable_proposal(
         proposed_by=proposed_by,
         approval_level=approval_level,
         expires_at=expires_at,
+        rollback_strategy=rollback_strategy,
         checksum="",
     )
     proposal.checksum = proposal_checksum(proposal)
     return proposal
 
 
-async def prepare_approval(conn: Any, proposal: ImmutableActionProposal, requester_agent: str) -> Approval:
-    span_manager.begin_session(
-        session_id=proposal.correlation_id,
-        correlation_id=proposal.correlation_id,
-    )
+async def prepare_approval(
+    conn: Any,
+    proposal: ImmutableActionProposal,
+    requester_agent: str,
+    *,
+    session_id: str | None = None,
+) -> Approval:
+    sid = session_id or proposal.correlation_id
+    span_manager.begin_session(session_id=sid, correlation_id=proposal.correlation_id)
     asp = span_manager.start(SpanType.APPROVAL, metadata={"phase": "prepare", "action": proposal.action})
     if proposal.checksum != proposal_checksum(proposal):
         raise ValueError("Proposal checksum invalid")
@@ -81,10 +113,11 @@ async def prepare_approval(conn: Any, proposal: ImmutableActionProposal, request
         action=proposal.action,
         side_effect_level=proposal.side_effect_level,
         impact_summary=proposal.impact_summary,
+        rollback_strategy=proposal.rollback_strategy,
     )
     decision = policy_engine.evaluate(
         action_proposal,
-        session_id=proposal.correlation_id,
+        session_id=sid,
     )
     if decision == PolicyDecision.DENY:
         raise ValueError("Policy denied action")
@@ -106,15 +139,23 @@ async def prepare_approval(conn: Any, proposal: ImmutableActionProposal, request
         event_type="approval.prepared",
         actor=proposal.proposed_by,
         correlation_id=proposal.correlation_id,
-        payload={"approval_id": approval_id, "action": proposal.action},
+        payload={
+            "approval_id": approval_id,
+            "action": proposal.action,
+            "rollback_strategy": proposal.rollback_strategy,
+        },
     )
     await persist_runtime_tx(
         conn,
         PersistRuntimePayload(
             correlation_id=proposal.correlation_id,
-            session_id=proposal.correlation_id,
+            session_id=sid,
             event_type="approval.prepared",
-            event_payload={"approval_id": approval_id, "action": proposal.action},
+            event_payload={
+                "approval_id": approval_id,
+                "action": proposal.action,
+                "rollback_strategy": proposal.rollback_strategy,
+            },
             business_key=f"approval:prepare:{approval_id}",
         ),
     )
@@ -134,11 +175,52 @@ def _validate_binding(frozen: ImmutableActionProposal, approval: Approval) -> No
         raise ValueError("Tool name mismatch in binding")
 
 
-async def execute_approved_action(conn: Any, approval: Approval, approved_by: str) -> dict:
-    span_manager.begin_session(
-        session_id=approval.correlation_id,
-        correlation_id=approval.correlation_id,
-    )
+def _frozen_execution_params(action: str, parameters: dict) -> dict:
+    allowed = EXECUTABLE_PARAM_KEYS.get(action)
+    if allowed:
+        return {k: v for k, v in parameters.items() if k in allowed}
+    return {k: v for k, v in parameters.items() if k not in GOVERNANCE_STRIP_KEYS}
+
+
+def _execution_params(frozen: ImmutableActionProposal, execution_overrides: dict | None) -> dict:
+    whitelist = EXECUTION_OVERRIDE_WHITELIST.get(frozen.action, set())
+
+    if execution_overrides:
+        disallowed = set(execution_overrides) - whitelist
+        if disallowed:
+            raise ValueError(f"Execution overrides not allowed for {frozen.action}: {sorted(disallowed)}")
+        if frozen.action == "execute_cancellation_override":
+            override_type = execution_overrides.get("override_type")
+            allowed_options = {
+                opt.get("option_id") for opt in frozen.parameters.get("options", []) if isinstance(opt, dict)
+            }
+            if override_type not in allowed_options:
+                raise ValueError(f"Invalid override_type: {override_type}")
+
+    if frozen.action == "execute_cancellation_override":
+        override_type = (execution_overrides or {}).get("override_type")
+        if not override_type:
+            raise ValueError("override_type required for execute_cancellation_override")
+        base = _frozen_execution_params(frozen.action, frozen.parameters)
+        base["override_type"] = override_type
+        return base
+
+    if execution_overrides:
+        raise ValueError(f"Execution overrides not allowed for {frozen.action}")
+
+    return _frozen_execution_params(frozen.action, frozen.parameters)
+
+
+async def execute_approved_action(
+    conn: Any,
+    approval: Approval,
+    approved_by: str,
+    *,
+    execution_overrides: dict | None = None,
+    session_id: str | None = None,
+) -> dict:
+    sid = session_id or approval.correlation_id
+    span_manager.begin_session(session_id=sid, correlation_id=approval.correlation_id)
     asp = span_manager.start(
         SpanType.APPROVAL,
         metadata={"phase": "execute", "approval_id": approval.id},
@@ -164,20 +246,26 @@ async def execute_approved_action(conn: Any, approval: Approval, approved_by: st
         action=frozen.action,
         side_effect_level=frozen.side_effect_level,
         impact_summary=frozen.impact_summary,
+        rollback_strategy=frozen.rollback_strategy,
     )
     decision = policy_engine.evaluate(
         action_proposal,
-        session_id=approval.correlation_id,
+        session_id=sid,
     )
     if decision not in (PolicyDecision.ALLOW, PolicyDecision.ESCALATE):
         raise ValueError(f"Policy re-validation failed: {decision.value}")
 
+    effective_params = _execution_params(frozen, execution_overrides)
+    if "approval_id" not in effective_params:
+        effective_params = {**effective_params, "approval_id": approval.id}
+
     result = await execute_tool(
         frozen.action,
-        frozen.agent,
+        "system",
         frozen.correlation_id,
-        frozen.parameters,
-        session_id=approval.correlation_id,
+        effective_params,
+        session_id=sid,
+        post_approval=True,
     )
 
     effect = SideEffectRecord(
@@ -189,7 +277,6 @@ async def execute_approved_action(conn: Any, approval: Approval, approved_by: st
         rollback_available=False,
         created_at=datetime.now(timezone.utc),
     )
-    sid = frozen.correlation_id
     await persist_runtime_tx(
         conn,
         PersistRuntimePayload(
@@ -206,25 +293,31 @@ async def execute_approved_action(conn: Any, approval: Approval, approved_by: st
             business_key=f"approval:{approval.id}:executed",
         ),
     )
-    await update_approval_status(conn, approval.id, ApprovalStatus.APPROVED, approved_by=approved_by)
+    final_status = ApprovalStatus.APPROVED if result.success else ApprovalStatus.EXECUTION_FAILED
+    await update_approval_status(conn, approval.id, final_status, approved_by=approved_by)
     await append_audit_event(
         conn,
         event_type="approval.executed",
         actor=approved_by,
         correlation_id=frozen.correlation_id,
-        payload={"approval_id": approval.id, "success": result.success},
+        payload={"approval_id": approval.id, "success": result.success, "status": final_status.value},
     )
     span_manager.end(asp, status=SpanStatus.OK if result.success else SpanStatus.ERROR)
     return {"approval_id": approval.id, "execution": result.model_dump(), "side_effect": effect.model_dump()}
 
 
-async def prepare_approval_in_session(proposal: ImmutableActionProposal, requester_agent: str) -> Approval:
-    session_id = proposal.correlation_id
+async def prepare_approval_in_session(
+    proposal: ImmutableActionProposal,
+    requester_agent: str,
+    *,
+    session_id: str | None = None,
+) -> Approval:
+    sid = session_id or proposal.correlation_id
 
     async def _work(conn: Any) -> Approval:
-        return await prepare_approval(conn, proposal, requester_agent)
+        return await prepare_approval(conn, proposal, requester_agent, session_id=sid)
 
-    return await run_mutative_session(session_id, _work)
+    return await run_mutative_session(sid, _work)
 
 
 async def execute_approved_action_in_session(
@@ -232,13 +325,81 @@ async def execute_approved_action_in_session(
     approved_by: str,
     *,
     session_id: str | None = None,
+    execution_overrides: dict | None = None,
 ) -> dict:
-    sid = session_id or approval_id
+    approval = await policy_engine.get_approval(approval_id)
+    sid = session_id or (approval.correlation_id if approval else approval_id)
 
     async def _work(conn: Any) -> dict:
-        approval = await load_approval(conn, approval_id)
-        if not approval or approval.status != ApprovalStatus.PENDING:
+        loaded = await load_approval(conn, approval_id)
+        if not loaded or loaded.status != ApprovalStatus.PENDING:
             raise ValueError("Approval not found or already processed")
-        return await execute_approved_action(conn, approval, approved_by)
+        return await execute_approved_action(
+            conn,
+            loaded,
+            approved_by,
+            execution_overrides=execution_overrides,
+            session_id=sid,
+        )
+
+    return await run_mutative_session(sid, _work)
+
+
+async def reject_approval(
+    conn: Any,
+    approval: Approval,
+    rejected_by: str,
+    *,
+    reason: str | None = None,
+    session_id: str | None = None,
+) -> Approval:
+    sid = session_id or approval.correlation_id
+    if approval.status != ApprovalStatus.PENDING:
+        raise ValueError("Approval not found or already processed")
+    await update_approval_status(conn, approval.id, ApprovalStatus.REJECTED, approved_by=rejected_by)
+    await append_audit_event(
+        conn,
+        event_type="approval.rejected",
+        actor=rejected_by,
+        correlation_id=approval.correlation_id,
+        payload={"approval_id": approval.id, "reason": reason or ""},
+    )
+    await persist_runtime_tx(
+        conn,
+        PersistRuntimePayload(
+            correlation_id=approval.correlation_id,
+            session_id=sid,
+            event_type="approval.rejected",
+            event_payload={"approval_id": approval.id, "rejected_by": rejected_by, "reason": reason or ""},
+            business_key=f"approval:{approval.id}:rejected",
+        ),
+    )
+    updated = await load_approval(conn, approval.id)
+    if updated is None:
+        raise ValueError("Approval not found after reject")
+    return updated
+
+
+async def reject_approval_in_session(
+    approval_id: str,
+    rejected_by: str,
+    *,
+    session_id: str | None = None,
+    reason: str | None = None,
+) -> Approval:
+    approval = await policy_engine.get_approval(approval_id)
+    sid = session_id or (approval.correlation_id if approval else approval_id)
+
+    async def _work(conn: Any) -> Approval:
+        loaded = await load_approval(conn, approval_id)
+        if not loaded:
+            raise ValueError("Approval not found")
+        return await reject_approval(
+            conn,
+            loaded,
+            rejected_by,
+            reason=reason,
+            session_id=sid,
+        )
 
     return await run_mutative_session(sid, _work)

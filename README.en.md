@@ -152,6 +152,8 @@ CEO-Agent/
 | Document | Content |
 |----------|---------|
 | `docs/MVP1_DEMO.md` | Operational console demo script (&lt;10 min) |
+| `docs/FACILRENTACAR_DEMO.md` | Four governed FacilRentaCar demo scenarios |
+| `docs/CEO-Agent-FacilRentaCar-Demo-Scenarios.md` | Detailed FacilRentaCar integration spec |
 | `docs/RRM2.md` | Runtime Intelligence — diagnostics, spans, telemetry |
 | `docs/RRM3.md` | Adaptive cognition — policy, stability, governance |
 | `spec_mvp_ceo_agent_platform_v_1.md` | Platform MVP spec |

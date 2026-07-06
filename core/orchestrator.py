@@ -938,5 +938,110 @@ class ManualOrchestrator:
             "result": result.model_dump(),
         }
 
+    async def run_domain_event(
+        self,
+        event: dict,
+        *,
+        session_id: str,
+        correlation_id: str,
+    ) -> dict:
+        from core.facilrentacar_handlers import dispatch_facilrentacar_event
+
+        try:
+            return await run_mutative_session(
+                session_id,
+                lambda conn: self._run_domain_event_locked(
+                    conn,
+                    event,
+                    session_id=session_id,
+                    correlation_id=correlation_id,
+                ),
+            )
+        except SessionLockError:
+            return {"error": "Concurrent write to same session forbidden", "session_id": session_id}
+
+    async def _run_domain_event_locked(
+        self,
+        conn: Any,
+        event: dict,
+        *,
+        session_id: str,
+        correlation_id: str,
+    ) -> dict:
+        from core.facilrentacar_handlers import RuntimeHandlerError, dispatch_facilrentacar_event
+
+        span_manager.begin_session(session_id=session_id, correlation_id=correlation_id)
+        sm = RuntimeStateMachine(correlation_id=correlation_id, session_id=session_id)
+        orch_span = span_manager.start(SpanType.ORCHESTRATION, runtime_state="perceiving")
+        try:
+            sm.start()
+            await persist_runtime_tx(
+                conn,
+                PersistRuntimePayload(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    event_type=event.get("event_type", "domain.event"),
+                    event_payload=event,
+                    business_key=f"event:{event.get('event_type', 'unknown')}",
+                ),
+            )
+            await self._record_transition(conn, sm, RuntimeState.REASONING, session_id)
+            result = await dispatch_facilrentacar_event(
+                self,
+                conn,
+                event,
+                session_id=session_id,
+                correlation_id=correlation_id,
+                sm=sm,
+            )
+            sm.complete()
+            span_manager.end(orch_span, status=SpanStatus.OK)
+            intel = await self._finalize_session_payload(
+                conn,
+                session_id=session_id,
+                correlation_id=correlation_id,
+                telemetry=[],
+                tool_results=[],
+            )
+            await persist_runtime_tx(
+                conn,
+                PersistRuntimePayload(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    event_type="session.completed",
+                    event_payload={"event_type": event.get("event_type"), "approval_id": result.get("approval", {}).get("approval_id")},
+                    business_key="session.completed",
+                    store_replay_baseline=True,
+                    **intel,
+                ),
+            )
+            return {
+                "session_id": session_id,
+                "correlation_id": correlation_id,
+                "runtime_state": "completed",
+                **result,
+            }
+        except RuntimeHandlerError as exc:
+            await persist_runtime_tx(
+                conn,
+                PersistRuntimePayload(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    event_type="domain.handler_error",
+                    event_payload={"event_type": event.get("event_type"), "error": str(exc)},
+                    business_key=f"event:error:{event.get('event_type', 'unknown')}",
+                ),
+            )
+            span_manager.end(orch_span, status=SpanStatus.ERROR)
+            return {
+                "session_id": session_id,
+                "correlation_id": correlation_id,
+                "runtime_state": "failed",
+                "error": str(exc),
+            }
+        except Exception:
+            span_manager.end(orch_span, status=SpanStatus.ERROR)
+            raise
+
 
 manual_orchestrator = ManualOrchestrator()

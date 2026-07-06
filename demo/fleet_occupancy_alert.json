@@ -1,0 +1,21 @@
+{
+  "demo_id": "occupancy",
+  "title": "Alerta ocupación crítica — tarifas",
+  "description": "Cadena COO → CFO → CEO con ajuste de pricing",
+  "session_id": "demo-occupancy-001",
+  "correlation_id": "demo-occupancy-001",
+  "event_type": "fleet_occupancy_critical",
+  "alert_triggered_at": "2024-12-05T09:00:00Z",
+  "current_occupancy_pct": 0.93,
+  "threshold_pct": 0.90,
+  "projection_period_days": 14,
+  "period_start": "2024-12-20",
+  "period_end": "2025-01-03",
+  "fleet_total": 45,
+  "fleet_available": 3,
+  "current_base_rate_ars_per_day": 28000.0,
+  "market_comparable_rate_ars_per_day": 35000.0,
+  "max_allowed_increase_pct": 0.35,
+  "categories_affected": ["SUV", "Pickup"],
+  "requested_by": "system"
+}

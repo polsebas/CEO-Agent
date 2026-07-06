@@ -1,0 +1,21 @@
+{
+  "demo_id": "compensation",
+  "title": "Compensación por incidencia vehicular",
+  "description": "CFO calcula descuento, CEO eleva propuesta EXECUTE_CRITICAL",
+  "session_id": "demo-compensation-001",
+  "correlation_id": "demo-compensation-001",
+  "event_type": "vehicle_incident_reported",
+  "reservation_id": "RES-2024-0891",
+  "client_id": "CLI-4421",
+  "client_name": "Empresa XYZ S.A.",
+  "vehicle_id": "VEH-112",
+  "vehicle_model": "Toyota Hilux 2023",
+  "incident_description": "Ruido inusual en transmisión reportado por el cliente durante el período de renta",
+  "incident_severity": "minor",
+  "reservation_amount_ars": 185000.0,
+  "reservation_start": "2024-12-01",
+  "reservation_end": "2024-12-07",
+  "days_remaining": 3,
+  "policy_max_compensation_pct": 0.20,
+  "requested_by": "founder"
+}

@@ -34,6 +34,7 @@ class ApprovalStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     EXPIRED = "expired"
+    EXECUTION_FAILED = "execution_failed"
 
 
 class ActionProposal(BaseModel):
@@ -57,6 +58,7 @@ class ImmutableActionProposal(BaseModel):
     impact_summary: str
     proposed_by: str
     approval_level: int = Field(ge=0, le=4)
+    rollback_strategy: str | None = None
     checksum: str
     expires_at: datetime
 

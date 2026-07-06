@@ -21,6 +21,7 @@ from tools.stubs.business import (
     propose_campaign,
     read_kpi_dashboard,
 )
+from tools.stubs import facilrentacar as frc_tools
 
 TOOL_HANDLERS = {
     "list_github_prs": list_github_prs,
@@ -36,6 +37,19 @@ TOOL_HANDLERS = {
     "propose_campaign": propose_campaign,
     "create_initiative": create_initiative,
     "escalate_to_human": escalate_to_human,
+    "get_reservation_detail": frc_tools.get_reservation_detail,
+    "get_compensation_policy": frc_tools.get_compensation_policy,
+    "apply_reservation_discount": frc_tools.apply_reservation_discount,
+    "get_client_history": frc_tools.get_client_history,
+    "get_cancellation_policy": frc_tools.get_cancellation_policy,
+    "execute_cancellation_override": frc_tools.execute_cancellation_override,
+    "get_fleet_occupancy": frc_tools.get_fleet_occupancy,
+    "get_current_rates": frc_tools.get_current_rates,
+    "get_market_rates": frc_tools.get_market_rates,
+    "publish_rate_adjustment": frc_tools.publish_rate_adjustment,
+    "get_branch_status": frc_tools.get_branch_status,
+    "get_pending_reservations_by_branch": frc_tools.get_pending_reservations_by_branch,
+    "activate_vehicles": frc_tools.activate_vehicles,
 }
 
 CACHEABLE = {"list_github_prs", "get_repo_health", "read_kpi_dashboard", "calculate_runway", "get_cashflow_summary"}
@@ -57,6 +71,7 @@ async def execute_tool(
     *,
     session_id: str | None = None,
     extra_approval_bias: float = 0.0,
+    post_approval: bool = False,
 ) -> ToolResult:
     from core.spans import span_manager
     from schemas.spans import SpanStatus, SpanType
@@ -89,29 +104,41 @@ async def execute_tool(
         )
 
     if cap.side_effect_level >= 2:
-        proposal = ActionProposal(
-            task_id=correlation_id,
-            agent=agent_id,
-            action=tool_name,
-            side_effect_level="EXECUTE_SAFE" if cap.side_effect_level == 2 else "EXECUTE_CRITICAL",
-            impact_summary=f"Execute {tool_name} with params {params}",
-        )
-        decision = policy_engine.evaluate(
-            proposal,
-            session_id=session_id or correlation_id,
-            extra_approval_bias=extra_approval_bias,
-        )
-        if decision == PolicyDecision.ESCALATE:
-            span_manager.end(tspan, status=SpanStatus.OK)
-            return ToolResult(
-                success=False,
-                errors=["WAITING_APPROVAL"],
-                data={"proposal": proposal.model_dump()},
-                source="policy",
-                latency_ms=0,
-                tool_name=tool_name,
-                correlation_id=correlation_id,
+        if agent_id == "system":
+            if not post_approval:
+                span_manager.end(tspan, status=SpanStatus.ERROR)
+                return ToolResult(
+                    success=False,
+                    errors=["SYSTEM_EXECUTE_NOT_AUTHORIZED"],
+                    source="router",
+                    latency_ms=0,
+                    tool_name=tool_name,
+                    correlation_id=correlation_id,
+                )
+        else:
+            proposal = ActionProposal(
+                task_id=correlation_id,
+                agent=agent_id,
+                action=tool_name,
+                side_effect_level="EXECUTE_SAFE" if cap.side_effect_level == 2 else "EXECUTE_CRITICAL",
+                impact_summary=f"Execute {tool_name} with params {params}",
             )
+            decision = policy_engine.evaluate(
+                proposal,
+                session_id=session_id or correlation_id,
+                extra_approval_bias=extra_approval_bias,
+            )
+            if decision == PolicyDecision.ESCALATE:
+                span_manager.end(tspan, status=SpanStatus.OK)
+                return ToolResult(
+                    success=False,
+                    errors=["WAITING_APPROVAL"],
+                    data={"proposal": proposal.model_dump()},
+                    source="policy",
+                    latency_ms=0,
+                    tool_name=tool_name,
+                    correlation_id=correlation_id,
+                )
 
     if tool_name in CACHEABLE:
         cached = await cache_get(tool_name, params)
@@ -140,7 +167,25 @@ async def execute_tool(
         )
 
     source = "github_mcp" if tool_name in {"list_github_prs", "get_repo_health"} else "stub"
+    if tool_name in {
+        "get_reservation_detail",
+        "get_compensation_policy",
+        "apply_reservation_discount",
+        "get_client_history",
+        "get_cancellation_policy",
+        "execute_cancellation_override",
+        "get_fleet_occupancy",
+        "get_current_rates",
+        "get_market_rates",
+        "publish_rate_adjustment",
+        "get_branch_status",
+        "get_pending_reservations_by_branch",
+        "activate_vehicles",
+    }:
+        source = "facilrentacar_mcp"
     result = await normalize_tool_call(tool_name, correlation_id, source, handler, **params)
+    if result.success and isinstance(result.data, dict):
+        result = result.model_copy(update={"source": result.data.get("source", result.source)})
 
     if result.success and tool_name in CACHEABLE and result.data:
         await cache_set(tool_name, params, result.data)

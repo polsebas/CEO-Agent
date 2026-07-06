@@ -20,6 +20,7 @@ from core.approval_service import (
     create_immutable_proposal,
     execute_approved_action_in_session,
     prepare_approval_in_session,
+    reject_approval_in_session,
 )
 from core.config import settings
 from core.orchestrator import manual_orchestrator
@@ -85,6 +86,13 @@ class PrepareRequest(BaseModel):
 class ApproveRequest(BaseModel):
     approved_by: str = "founder"
     session_id: str | None = None
+    selected_option: str | None = None
+
+
+class RejectRequest(BaseModel):
+    rejected_by: str = "founder"
+    session_id: str | None = None
+    reason: str | None = None
 
 
 @app.get("/health")
@@ -174,15 +182,45 @@ async def approve_action(
         raise HTTPException(status_code=404, detail="Approval not found")
     if not can_approve_level(auth.role, approval.risk_level):
         raise HTTPException(status_code=403, detail=f"Role cannot approve level {approval.risk_level}")
+    frozen = approval.immutable_proposal
+    if frozen and frozen.action == "execute_cancellation_override" and not body.selected_option:
+        raise HTTPException(status_code=400, detail="selected_option required for execute_cancellation_override")
     try:
+        execution_overrides = None
+        if body.selected_option:
+            execution_overrides = {"override_type": body.selected_option}
         result = await execute_approved_action_in_session(
             approval_id,
             approved_by=auth.user_id,
             session_id=body.session_id or approval.correlation_id,
+            execution_overrides=execution_overrides,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result
+
+
+@app.post("/api/v1/actions/reject/{approval_id}")
+async def reject_action(
+    approval_id: str,
+    body: RejectRequest,
+    auth: Annotated[AuthContext, Depends(require_permission(Permission.ACTION_APPROVE))],
+):
+    approval = await policy_engine.get_approval(approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if not can_approve_level(auth.role, approval.risk_level):
+        raise HTTPException(status_code=403, detail=f"Role cannot approve level {approval.risk_level}")
+    try:
+        rejected = await reject_approval_in_session(
+            approval_id,
+            rejected_by=auth.user_id,
+            session_id=body.session_id or approval.correlation_id,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return rejected.model_dump()
 
 
 @app.get("/api/v1/approvals")

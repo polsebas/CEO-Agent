@@ -19,6 +19,7 @@ class DecisionRecord(BaseModel):
     context_used: list[str] = Field(default_factory=list)
     policies_applied: list[str] = Field(default_factory=list)
     tools_used: list[str] = Field(default_factory=list)
+    tools_used_by: dict[str, list[str]] | None = None
     reasoning_summary: str
     confidence: CalibratedConfidence
     final_action: str

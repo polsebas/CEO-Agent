@@ -13,6 +13,10 @@ class Company(BaseModel):
     churn_rate: float
     burn_rate_usd: float
     runway_months: float
+    fleet_size: int | None = None
+    active_reservations: int | None = None
+    pending_incidents: int | None = None
+    compensation_policy_max_pct: float | None = None
 
 
 class Incident(BaseModel):
@@ -87,4 +91,24 @@ def default_world_state() -> WorldState:
                 deployed_at=datetime.now(timezone.utc),
             )
         ],
+    )
+
+
+def default_facilrentacar_world_state() -> WorldState:
+    return WorldState(
+        version=1,
+        company=Company(
+            id="frc-1",
+            name="FacilRentaCar",
+            mrr_usd=120000.0,
+            churn_rate=0.018,
+            burn_rate_usd=95000.0,
+            runway_months=18.0,
+            fleet_size=45,
+            active_reservations=38,
+            pending_incidents=2,
+            compensation_policy_max_pct=0.20,
+        ),
+        active_incidents=[],
+        active_deployments=[],
     )

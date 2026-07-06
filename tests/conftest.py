@@ -4,6 +4,8 @@ from core.cache import reset_cache
 from core.config import settings
 from core.runtime_session import reset_memory_session_locks
 
+pytest_plugins = ["tests.fixtures.facilrentacar_mocks"]
+
 
 @pytest.fixture(autouse=True)
 def in_memory_store(monkeypatch):
@@ -25,3 +27,5 @@ def in_memory_store(monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "postgres: integration tests requiring Postgres")
+    config.addinivalue_line("markers", "smoke: fast wiring smoke tests")
+    config.addinivalue_line("markers", "integration: tests requiring live LLM API keys")

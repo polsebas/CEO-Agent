@@ -17,11 +17,28 @@
           <p class="text-sm opacity-70">Risk level {{ card.approval.risk_level }} · corr {{ card.approval.correlation_id }}</p>
         </div>
         {% if can_approve %}
-        <form method="post" action="/ui/approvals/{{ card.approval.id }}/approve">
+        <form method="post" action="/ui/approvals/{{ card.approval.id }}/approve" class="flex flex-wrap gap-2 items-end">
+          {% if card.approval.immutable_proposal and card.approval.immutable_proposal.action == 'execute_cancellation_override' %}
+          <label class="form-control w-full max-w-xs">
+            <span class="label-text text-xs">Opción de override</span>
+            <select name="selected_option" class="select select-bordered select-sm" required>
+              {% for option in card.approval.immutable_proposal.parameters.get('options', []) %}
+              <option value="{{ option.option_id }}" {% if option.option_id == card.approval.immutable_proposal.parameters.get('recommended_option') %}selected{% endif %}>
+                {{ option.description }} — ARS {{ '{:,.0f}'.format(option.financial_impact_ars) }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          {% endif %}
           <button type="submit" class="btn btn-success btn-sm">Aprobar</button>
         </form>
         {% endif %}
       </div>
+      {% if card.approval.proposal and card.approval.proposal.impact_summary %}
+      <p class="text-sm mt-2 whitespace-pre-line">{{ card.approval.proposal.impact_summary }}</p>
+      {% elif card.approval.immutable_proposal %}
+      <p class="text-sm mt-2 whitespace-pre-line">{{ card.approval.immutable_proposal.impact_summary }}</p>
+      {% endif %}
       {% if card.human_context %}
       <ul class="mt-3 text-sm space-y-1">
         {% for line in card.human_context %}

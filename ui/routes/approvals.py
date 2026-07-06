@@ -47,15 +47,26 @@ async def approve_htmx(
     approval_id: str,
     auth: Annotated[AuthContext, Depends(require_ui_auth)],
     session_id: Annotated[str | None, Form()] = None,
+    selected_option: Annotated[str | None, Form()] = None,
 ):
     if not role_has_permission(auth.role, Permission.ACTION_APPROVE):
         return RedirectResponse("/approvals", status_code=303)
     approval = await policy_engine.get_approval(approval_id)
     if not approval or not can_approve_level(auth.role, approval.risk_level):
         return RedirectResponse("/approvals", status_code=303)
-    await execute_approved_action_in_session(
-        approval_id,
-        approved_by=auth.user_id,
-        session_id=session_id or approval.correlation_id,
-    )
+    frozen = approval.immutable_proposal
+    if frozen and frozen.action == "execute_cancellation_override" and not selected_option:
+        return RedirectResponse("/approvals", status_code=303)
+    execution_overrides = None
+    if selected_option and frozen:
+        execution_overrides = {"override_type": selected_option}
+    try:
+        await execute_approved_action_in_session(
+            approval_id,
+            approved_by=auth.user_id,
+            session_id=session_id or approval.correlation_id,
+            execution_overrides=execution_overrides,
+        )
+    except ValueError:
+        return RedirectResponse("/approvals", status_code=303)
     return RedirectResponse("/approvals", status_code=303)
