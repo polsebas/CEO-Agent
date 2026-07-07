@@ -25,6 +25,7 @@ SCENARIO_FILES = {
     "cancellation": "cancellation_override.json",
     "occupancy": "fleet_occupancy_alert.json",
     "reactivation": "fleet_reactivation.json",
+    "linkedin": "linkedin_campaign_request.json",
 }
 
 

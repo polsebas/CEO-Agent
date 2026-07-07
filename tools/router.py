@@ -50,6 +50,7 @@ TOOL_HANDLERS = {
     "get_branch_status": frc_tools.get_branch_status,
     "get_pending_reservations_by_branch": frc_tools.get_pending_reservations_by_branch,
     "activate_vehicles": frc_tools.activate_vehicles,
+    "launch_linkedin_campaign": frc_tools.launch_linkedin_campaign,
 }
 
 CACHEABLE = {"list_github_prs", "get_repo_health", "read_kpi_dashboard", "calculate_runway", "get_cashflow_summary"}
@@ -181,6 +182,7 @@ async def execute_tool(
         "get_branch_status",
         "get_pending_reservations_by_branch",
         "activate_vehicles",
+        "launch_linkedin_campaign",
     }:
         source = "facilrentacar_mcp"
     result = await normalize_tool_call(tool_name, correlation_id, source, handler, **params)

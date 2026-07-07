@@ -1,0 +1,15 @@
+{
+  "demo_id": "linkedin_campaign",
+  "title": "LinkedIn B2B growth campaign",
+  "description": "CMO detects organic growth opportunity, CEO elevates launch_linkedin_campaign as EXECUTE_CRITICAL",
+  "session_id": "demo-linkedin-001",
+  "correlation_id": "demo-linkedin-001",
+  "event_type": "linkedin_growth_opportunity_detected",
+  "proposed_campaign_name": "B2B Fleet Lead Gen — Q1",
+  "target_segment": "corporate_fleet",
+  "organic_impressions_30d": 42000,
+  "organic_ctr": 0.019,
+  "historical_cac_usd": 145.0,
+  "suggested_budget_ars": 150000.0,
+  "requested_by": "founder"
+}

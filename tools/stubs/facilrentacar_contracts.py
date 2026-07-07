@@ -94,6 +94,27 @@ ACTIVATE_VEHICLES_SUCCESS = {
     "activated_count": 2,
 }
 
+LINKEDIN_ANALYTICS = {
+    "cac_usd": 145.0,
+    "ltv_usd": 980.0,
+    "conversion_rate": 0.028,
+    "active_campaigns": 1,
+    "organic_impressions": 42000,
+    "organic_ctr": 0.019,
+}
+
+LINKEDIN_CAMPAIGN_DRAFT = {
+    "proposal": "B2B Fleet Lead Gen — Q1",
+    "estimated_cac": 130.0,
+    "status": "draft",
+}
+
+LINKEDIN_CAMPAIGN_LAUNCH_SUCCESS = {
+    "campaign_name": "B2B Fleet Lead Gen — Q1",
+    "status": "live",
+    "launched_channel": "linkedin",
+}
+
 CONTRACT_BY_TOOL: dict[str, dict] = {
     "get_reservation_detail": RESERVATION_DETAIL,
     "get_compensation_policy": COMPENSATION_POLICY,
@@ -108,4 +129,7 @@ CONTRACT_BY_TOOL: dict[str, dict] = {
     "get_branch_status": BRANCH_STATUS,
     "get_pending_reservations_by_branch": PENDING_RESERVATIONS,
     "activate_vehicles": ACTIVATE_VEHICLES_SUCCESS,
+    "get_analytics_summary": LINKEDIN_ANALYTICS,
+    "propose_campaign": LINKEDIN_CAMPAIGN_DRAFT,
+    "launch_linkedin_campaign": LINKEDIN_CAMPAIGN_LAUNCH_SUCCESS,
 }

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from schemas.responses import CEOResponse, CFOResponse, COOResponse, CancellationOption
+from schemas.responses import CEOResponse, CFOResponse, CMOResponse, COOResponse, CancellationOption
 from tests.fixtures.fake_tool_router import FakeToolRouter
 
 
@@ -94,6 +94,25 @@ def mock_cancellation_agents():
         reasoning="LTV supera 10x penalidad",
     )
     return cfo, ceo
+
+
+@pytest.fixture
+def mock_linkedin_agents():
+    cmo = CMOResponse(
+        summary="Organic LinkedIn engagement supports a targeted B2B push",
+        campaign_status="draft_pending_approval",
+        cac_analysis={"cac_usd": 145.0, "ltv_usd": 980.0, "ratio": 6.76},
+        campaign_name="B2B Fleet Lead Gen — Q1",
+        target_segment="corporate_fleet",
+        budget_ars=150000.0,
+        estimated_cac_usd=130.0,
+        recommendations=["Requires CEO consolidation before founder approval"],
+    )
+    ceo = CEOResponse(
+        summary="Elevate LinkedIn campaign for founder approval",
+        recommended_actions=["launch_linkedin_campaign"],
+    )
+    return cmo, ceo
 
 
 def patch_agent_runner_responses(*responses):

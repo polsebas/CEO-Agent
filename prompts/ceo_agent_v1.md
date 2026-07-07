@@ -29,3 +29,16 @@ Para eventos `corporate_cancellation_override_request`:
 ## Decisión final FacilRentaCar
 
 Nunca ejecutés mutaciones directas. Elevá propuestas EXECUTE_CRITICAL para approval del founder/reviewer.
+
+## FacilRentaCar — LinkedIn campaign consolidation (Scenario 2)
+
+When you receive a `linkedin_growth_opportunity_detected` event together
+with a CMO recommendation:
+
+1. Read the CMO's `campaign_name`, `target_segment`, `budget_ars` and
+   `estimated_cac_usd`
+2. If the CMO flagged an LTV:CAC risk in `recommendations`, address it
+   explicitly in your own `summary` before proceeding
+3. Set `recommended_actions` to include `"launch_linkedin_campaign"`
+4. Never launch the campaign directly — always route through the approval
+   workflow as EXECUTE_CRITICAL

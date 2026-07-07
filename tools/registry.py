@@ -89,6 +89,7 @@ def build_facilrentacar_registry() -> ToolCapabilityRegistry:
         ("execute_cancellation_override", "EXECUTE", ["ceo", "system"], 3),
         ("publish_rate_adjustment", "EXECUTE", ["ceo", "system"], 3),
         ("activate_vehicles", "EXECUTE", ["ceo", "system"], 3),
+        ("launch_linkedin_campaign", "EXECUTE", ["ceo", "system"], 3),
     ]
     for name, action_class, agents, level in read_tools + mutate_tools:
         registry.register(

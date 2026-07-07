@@ -1,6 +1,6 @@
 # Demo C — CMO: campaña LinkedIn (fase 2)
 
-**Estado:** 🚧 Bloqueado hasta validar [Demo A — CFO](./A-cfo-compensation.md) end-to-end en UI.
+**Estado:** Código **listo** (handler, tool, gate test verdes). La *presentación* a stakeholders sigue bloqueada hasta validar [Demo A — CFO](./A-cfo-compensation.md) end-to-end en UI (ver "Checklist de desbloqueo").
 
 **Rol:** pieza fuerte para LinkedIn — muestra gasto de marketing con approval obligatorio.
 
@@ -21,13 +21,13 @@
 | Descuento en reserva existente | Gasto nuevo + creatividad |
 | Valida el patrón approval → execute | Reutiliza el mismo patrón ya demostrado |
 
-## Entregables previstos (no implementados aún)
+## Entregables
 
-- `demo/linkedin_campaign_request.json`
-- Extensión `prompts/cmo_agent_v1.md` (contexto FacilRentaCar B2B)
-- `tests/gate/test_scenario_linkedin_campaign.py`
-- `python scripts/seed_demo.py --scenario linkedin`
-- Guion demo + post LinkedIn largo (case study)
+- [x] `demo/linkedin_campaign_request.json`
+- [x] Extensión `prompts/cmo_agent_v1.md` (contexto FacilRentaCar B2B)
+- [x] `tests/gate/test_scenario_linkedin_campaign.py`
+- [x] `python scripts/seed_demo.py --scenario linkedin`
+- [ ] Guion demo + post LinkedIn largo (case study)
 
 ## Borrador ángulo LinkedIn (C — cuando esté listo)
 

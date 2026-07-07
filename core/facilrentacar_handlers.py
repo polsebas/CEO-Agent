@@ -8,14 +8,14 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from agents.factory import create_ceo_agent, create_cfo_agent, create_coo_agent
+from agents.factory import create_ceo_agent, create_cfo_agent, create_cmo_agent, create_coo_agent
 from core.agent_runner import structured_agent_runner
 from core.approval_service import create_immutable_proposal, prepare_approval
 from core.confidence import calibrate_confidence
 from core.persistence import get_world_state
 from core.transaction import PersistRuntimePayload, persist_runtime_tx
 from schemas.decisions import DecisionRecord
-from schemas.responses import CEOResponse, CFOResponse, COOResponse, CancellationOption
+from schemas.responses import CEOResponse, CFOResponse, CMOResponse, COOResponse, CancellationOption
 from schemas.runtime import RuntimeState
 from schemas.tools import ToolResult
 from tools.router import execute_tool
@@ -89,7 +89,12 @@ async def run_agent_with_tools(
     policy = await orchestrator._resolve_adaptive_policy(conn, session_id, correlation_id, sm)
     budget = orchestrator._cognitive_budget(policy=policy)
 
-    agent_factory = {"cfo": create_cfo_agent, "coo": create_coo_agent, "ceo": create_ceo_agent}
+    agent_factory = {
+        "cfo": create_cfo_agent,
+        "coo": create_coo_agent,
+        "ceo": create_ceo_agent,
+        "cmo": create_cmo_agent,
+    }
     agent = agent_factory[agent_id]()
     response, _trace, _tel = await structured_agent_runner.run(
         agent,
@@ -564,6 +569,88 @@ async def handle_cancellation_override(
         impact_summary=impact_summary,
         rollback_strategy="Aplicar penalidad contractual estándar sin override.",
         ttl=APPROVAL_TTL_CRITICAL,
+    )
+    return {"event_type": event["event_type"], "approval": approval, "session_id": session_id}
+
+
+@register_handler("linkedin_growth_opportunity_detected")
+async def handle_linkedin_campaign_opportunity(
+    orchestrator: ManualOrchestrator,
+    conn: Any,
+    event: dict,
+    *,
+    session_id: str,
+    correlation_id: str,
+    sm: RuntimeStateMachine,
+) -> dict:
+    cmo_response, cmo_tools, tools_map = await run_agent_with_tools(
+        orchestrator,
+        conn,
+        agent_id="cmo",
+        response_model=CMOResponse,
+        base_prompt=f"LinkedIn growth opportunity detected. Event: {json.dumps(event)}",
+        tool_calls=[
+            ToolCall("get_analytics_summary", {}, "LinkedIn organic analytics"),
+            ToolCall(
+                "propose_campaign",
+                {"name": event.get("proposed_campaign_name", "B2B Fleet Lead Gen")},
+                "Campaign draft",
+            ),
+        ],
+        session_id=session_id,
+        correlation_id=correlation_id,
+        sm=sm,
+    )
+    campaign_name = cmo_response.campaign_name or event.get(
+        "proposed_campaign_name", "B2B Fleet Lead Gen"
+    )
+    target_segment = cmo_response.target_segment or event.get("target_segment", "corporate_fleet")
+    budget_ars = cmo_response.budget_ars or event.get("suggested_budget_ars", 150000.0)
+
+    ceo_response, _, ceo_tools = await run_agent_with_tools(
+        orchestrator,
+        conn,
+        agent_id="ceo",
+        response_model=CEOResponse,
+        base_prompt=f"Consolidate LinkedIn campaign proposal. CMO: {cmo_response.model_dump()}",
+        tool_calls=[],
+        session_id=session_id,
+        correlation_id=correlation_id,
+        sm=sm,
+        step_id=1,
+    )
+    tools_map.update(ceo_tools)
+    all_tools = [t for names in tools_map.values() for t in names]
+
+    await _persist_decision(
+        conn,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        objective=f"LinkedIn B2B campaign — {campaign_name}",
+        agent="ceo",
+        summary=ceo_response.summary or cmo_response.summary,
+        tools_used=all_tools,
+        tools_used_by=tools_map,
+        sm=sm,
+        final_action="launch_linkedin_campaign",
+    )
+
+    approval = await _prepare_critical_proposal(
+        conn,
+        correlation_id=correlation_id,
+        session_id=session_id,
+        action="launch_linkedin_campaign",
+        parameters={
+            "campaign_name": campaign_name,
+            "target_segment": target_segment,
+            "budget_ars": budget_ars,
+        },
+        impact_summary=(
+            f"LinkedIn campaign '{campaign_name}' — segment {target_segment} — "
+            f"ARS {budget_ars:,.0f}"
+        ),
+        rollback_strategy="Campaign stays in draft. Nothing is published to LinkedIn.",
+        ttl=APPROVAL_TTL_STANDARD,
     )
     return {"event_type": event["event_type"], "approval": approval, "session_id": session_id}
 

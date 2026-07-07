@@ -42,6 +42,7 @@ EXECUTABLE_PARAM_KEYS: dict[str, set[str]] = {
         "approval_id",
     },
     "activate_vehicles": {"vehicle_ids", "activation_notes", "approval_id"},
+    "launch_linkedin_campaign": {"campaign_name", "target_segment", "budget_ars", "approval_id"},
 }
 
 

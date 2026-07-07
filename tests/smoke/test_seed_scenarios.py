@@ -32,12 +32,14 @@ async def test_seed_scenario_produces_pending_approval(
     mock_reactivation_agents,
     mock_occupancy_agents,
     mock_cancellation_agents,
+    mock_linkedin_agents,
 ):
     mocks = {
         "compensation": mock_compensation_agents,
         "reactivation": mock_reactivation_agents,
         "occupancy": mock_occupancy_agents,
         "cancellation": mock_cancellation_agents,
+        "linkedin": mock_linkedin_agents,
     }
     agents = mocks[scenario]
     with patch_agent_runner_responses(*agents):

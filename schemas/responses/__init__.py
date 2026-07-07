@@ -91,3 +91,7 @@ class CMOResponse(BaseModel):
     cac_analysis: dict = Field(default_factory=dict)
     conversion_funnel: dict = Field(default_factory=dict)
     recommendations: list[str] = Field(default_factory=list)
+    campaign_name: str | None = None
+    target_segment: str | None = None
+    budget_ars: float | None = None
+    estimated_cac_usd: float | None = None

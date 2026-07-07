@@ -190,3 +190,31 @@ async def activate_vehicles(
         activation_notes=activation_notes,
         approval_id=approval_id,
     )
+
+
+async def launch_linkedin_campaign(
+    campaign_name: str,
+    target_segment: str,
+    budget_ars: float,
+    approval_id: str,
+) -> dict:
+    if not approval_id:
+        raise ValueError("approval_id required for launch_linkedin_campaign")
+    mcp = await _facilrentacar_mcp_call(
+        "launch_linkedin_campaign",
+        {
+            "campaign_name": campaign_name,
+            "target_segment": target_segment,
+            "budget_ars": budget_ars,
+            "approval_id": approval_id,
+        },
+    )
+    if mcp:
+        return {"source": "facilrentacar_mcp", **mcp}
+    return _stub(
+        "launch_linkedin_campaign",
+        campaign_name=campaign_name,
+        target_segment=target_segment,
+        budget_ars=budget_ars,
+        approval_id=approval_id,
+    )
